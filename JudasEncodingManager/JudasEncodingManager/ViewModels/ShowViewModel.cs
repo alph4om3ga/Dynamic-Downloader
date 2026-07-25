@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -19,6 +20,10 @@ namespace JudasEncodingManager.ViewModels
 
         private readonly WeeklyShow _model;
         public WeeklyShow Model => _model;
+
+        // ── Crunchyroll season picker ────────────────────────────────────────
+        private readonly ObservableCollection<CrdSeasonOption> _availableSeasons = new();
+        private CrdSeasonOption? _selectedSeason;
 
         public ShowViewModel() : this(new WeeklyShow()) { }
 
@@ -214,6 +219,13 @@ namespace JudasEncodingManager.ViewModels
             set { _model.CrdShowId = value; OnPropertyChanged(); }
         }
 
+        /// <summary>Series title returned by the Crunchyroll API (read-only display).</summary>
+        public string CrdShowTitle
+        {
+            get => _model.CrdShowTitle;
+            set { _model.CrdShowTitle = value; OnPropertyChanged(); }
+        }
+
         public string CrdSeasonId
         {
             get => _model.CrdSeasonId;
@@ -224,6 +236,50 @@ namespace JudasEncodingManager.ViewModels
         {
             get => _model.CrdSeasonName;
             set { _model.CrdSeasonName = value; OnPropertyChanged(); }
+        }
+
+        // ── Season picker ────────────────────────────────────────────────────
+
+        /// <summary>Seasons loaded from the Crunchyroll API for this show.</summary>
+        public ObservableCollection<CrdSeasonOption> AvailableSeasons => _availableSeasons;
+
+        /// <summary>
+        /// The season the user has selected. Setter writes back to
+        /// <see cref="CrdSeasonId"/> and <see cref="CrdSeasonName"/>.
+        /// </summary>
+        public CrdSeasonOption? SelectedSeason
+        {
+            get => _selectedSeason;
+            set
+            {
+                _selectedSeason = value;
+                if (value != null)
+                {
+                    CrdSeasonId   = value.Id;
+                    CrdSeasonName = value.Title;
+                }
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Populates <see cref="AvailableSeasons"/> from the supplied list and
+        /// re-selects the season whose ID matches the current <see cref="CrdSeasonId"/>.
+        /// </summary>
+        public void SetAvailableSeasons(List<CrdSeasonOption> seasons)
+        {
+            _availableSeasons.Clear();
+            foreach (var s in seasons)
+                _availableSeasons.Add(s);
+
+            // Re-select current season if one is already saved
+            var match = _availableSeasons
+                .FirstOrDefault(s => s.Id == _model.CrdSeasonId);
+
+            // Suppress the write-back that SelectedSeason.setter would do when
+            // we set from saved data (values are already identical)
+            _selectedSeason = match;
+            OnPropertyChanged(nameof(SelectedSeason));
         }
 
         public string CrdOutputPath

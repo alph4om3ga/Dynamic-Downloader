@@ -34,6 +34,8 @@ namespace JudasEncodingManager.ViewModels
         public bool FoundThisWeek { get; set; }
         public int CheckCount { get; set; }
         public TimeSpan CurrentInterval { get; set; } = TimeSpan.FromMinutes(1);
+        /// <summary>True once CRD has been auto-launched for this release window.</summary>
+        public bool CrdAutoLaunched { get; set; }
 
         // ── CRD timing constants ────────────────────────────────────────────
         // Phase 1: every 1 min for the first 10 min
@@ -54,9 +56,10 @@ namespace JudasEncodingManager.ViewModels
 
         public void ResetForNewWeek()
         {
-            FoundThisWeek = false;
-            CheckCount = 0;
-            CurrentInterval = Method == CRD ? CrdPhase1Interval : RssInitialInterval;
+            FoundThisWeek     = false;
+            CheckCount        = 0;
+            CrdAutoLaunched   = false;
+            CurrentInterval   = Method == CRD ? CrdPhase1Interval : RssInitialInterval;
             ReleaseWindowStart = null;
             NextScheduledCheck = null;
         }
@@ -888,7 +891,23 @@ namespace JudasEncodingManager.ViewModels
             var nextEp      = releasedEps.Count > 0 ? releasedEps.Max() + 1 : 1;
 
             // Reconfigure in case the path changed since service was initialised
-            _crdService.Configure(_getSettings().CRD.Path);
+            var settings = _getSettings();
+            _crdService.Configure(settings.CRD.Path);
+
+            // ── Auto-launch CRD the first time a release window opens ──────────
+            if (settings.CRD.AutoLaunchOnRelease)
+            {
+                var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
+                if (_monitoringStates.TryGetValue(showId, out var st) && !st.CrdAutoLaunched)
+                {
+                    st.CrdAutoLaunched = true;
+                    _crdService.Launch();
+                    AddLogEntry(
+                        $"[CRD] 🚀 Auto-launched CRD for {show.DisplayName} — Ep {nextEp} is due. " +
+                        "Download it in CRD; JEM will detect it automatically.",
+                        ActivityLogLevel.Info);
+                }
+            }
 
             var filePath = _crdService.FindEpisodeFile(show.CrdOutputPath, show.CrdFilePattern, nextEp);
             if (filePath == null) return Task.FromResult(false);

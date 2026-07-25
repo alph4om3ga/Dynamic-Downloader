@@ -48,6 +48,9 @@ namespace JudasEncodingManager.Models
 
         [JsonProperty("crd")]
         public CRDSettings CRD { get; set; } = new();
+
+        [JsonProperty("crunchyroll")]
+        public CrunchyrollSettings Crunchyroll { get; set; } = new();
     }
 
     public class QBittorrentSettings
@@ -330,6 +333,27 @@ namespace JudasEncodingManager.Models
         /// <summary>When true, the built-in Updater.exe is run on startup.</summary>
         [JsonProperty("auto_update")]
         public bool AutoUpdate { get; set; } = false;
+
+        /// <summary>
+        /// When true, JEM launches CRD.exe automatically the first time a show's
+        /// release window opens. The user still downloads in CRD manually; this is
+        /// just a nudge so they don't have to watch the clock.
+        /// </summary>
+        [JsonProperty("auto_launch_on_release")]
+        public bool AutoLaunchOnRelease { get; set; } = false;
+    }
+
+    public class CrunchyrollSettings
+    {
+        /// <summary>Crunchyroll account email — used to obtain a Bearer token for
+        /// series search and season listing.</summary>
+        [JsonProperty("email")]
+        public string Email { get; set; } = "";
+
+        /// <summary>Crunchyroll account password (stored in plain text alongside
+        /// other credentials in this file).</summary>
+        [JsonProperty("password")]
+        public string Password { get; set; } = "";
     }
 
     public class WeeklyShow
@@ -341,6 +365,10 @@ namespace JudasEncodingManager.Models
         /// <summary>Crunchyroll series ID, e.g. "GT00378117".</summary>
         [JsonProperty("crd_show_id")]
         public string CrdShowId { get; set; } = "";
+
+        /// <summary>Series title as returned by the Crunchyroll API.</summary>
+        [JsonProperty("crd_show_title")]
+        public string CrdShowTitle { get; set; } = "";
 
         /// <summary>Crunchyroll season ID (populated after loading the show in CRD).</summary>
         [JsonProperty("crd_season_id")]
