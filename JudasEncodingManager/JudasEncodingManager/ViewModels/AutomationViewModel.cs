@@ -1,0 +1,1932 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using System.Xml.Linq;
+using CommunityToolkit.Mvvm.Input;
+using JudasEncodingManager.Models;
+using JudasEncodingManager.Services;
+
+namespace JudasEncodingManager.ViewModels
+{
+    /// <summary>
+    /// Tracks the monitoring state for each show to implement smart RSS checking
+    /// </summary>
+    public class ShowMonitoringState
+    {
+        public string ShowId { get; set; } = "";
+        public DateTime? LastCheckTime { get; set; }
+        public DateTime? ReleaseWindowStart { get; set; }
+        public DateTime? NextScheduledCheck { get; set; }
+        public bool FoundThisWeek { get; set; }
+        public int CheckCount { get; set; }
+        public TimeSpan CurrentInterval { get; set; } = TimeSpan.FromMinutes(5);
+        
+        // Interval stages
+        public static readonly TimeSpan InitialInterval = TimeSpan.FromMinutes(5);      // First hour: every 5 min
+        public static readonly TimeSpan AfterOneHour = TimeSpan.FromMinutes(30);        // 1-6 hours: every 30 min
+        public static readonly TimeSpan AfterSixHours = TimeSpan.FromHours(12);         // After 6 hours: every 12 hours
+        
+        public void ResetForNewWeek()
+        {
+            FoundThisWeek = false;
+            CheckCount = 0;
+            CurrentInterval = InitialInterval;
+            ReleaseWindowStart = null;
+        }
+
+        public void UpdateIntervalBasedOnElapsedTime()
+        {
+            if (ReleaseWindowStart == null) return;
+            
+            var elapsed = DateTime.Now - ReleaseWindowStart.Value;
+            
+            if (elapsed.TotalHours >= 6)
+            {
+                CurrentInterval = AfterSixHours;
+            }
+            else if (elapsed.TotalHours >= 1)
+            {
+                CurrentInterval = AfterOneHour;
+            }
+            else
+            {
+                CurrentInterval = InitialInterval;
+            }
+        }
+    }
+
+    public class AutomationViewModel : INotifyPropertyChanged
+    {
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+
+        private readonly ObservableCollection<ShowViewModel> _shows;
+        private readonly Dictionary<string, ShowMonitoringState> _monitoringStates = new();
+        private readonly Func<AppSettings> _getSettings;
+        
+        // Services
+        private QBittorrentService? _qbitService;
+        private EncodingService? _encodingService;
+        private MuxingService? _muxingService;
+        private ScreenshotService? _screenshotService;
+        private FtpService? _ftpService;
+        private TorrentService? _torrentService;
+        private NyaaService? _nyaaService;
+        private DiscordService? _discordService;
+        
+        // State
+        private bool _isMonitoring;
+        private bool _isPaused;
+        private bool _isProcessing;
+        private int _rssCheckInterval = 5;
+        private string _monitoringStatus = "Stopped";
+        private ShowViewModel? _testRunSelectedShow;
+        private RssItem? _testRunSelectedEpisode;
+        private string _testRunStatus = "Select a show and load episodes";
+        private QueueItem? _selectedQueueItem;
+        private CancellationTokenSource? _monitoringCts;
+        private CancellationTokenSource? _currentProcessCts;
+        private CancellationTokenSource? _testRunCts;
+        
+        // Test run state
+        private bool _isSimulatedTest = true;
+        private bool _isQuickEncode = true;  // true = 5-min test, false = full encode
+        private bool _isHiddenPost = true;   // true = hidden on Nyaa, false = public
+        private bool _isTestRunning;
+        private double _testRunProgress;
+
+        public AutomationViewModel(ObservableCollection<ShowViewModel> shows, Func<AppSettings>? getSettings = null)
+        {
+            _shows = shows;
+            _getSettings = getSettings ?? (() => new AppSettings());
+
+            Queue = new ObservableCollection<QueueItem>();
+            TestRunRssItems = new ObservableCollection<RssItem>();
+            ActivityLog = new ObservableCollection<ActivityLogEntry>();
+
+            // Monitoring commands
+            StartMonitoringCommand = new RelayCommand(StartMonitoring, () => !IsMonitoring);
+            StopMonitoringCommand = new RelayCommand(StopMonitoring, () => IsMonitoring);
+            PauseQueueCommand = new RelayCommand(PauseQueue, () => IsMonitoring && !IsPaused);
+            ResumeQueueCommand = new RelayCommand(ResumeQueue, () => IsPaused);
+            CancelCurrentProcessCommand = new RelayCommand(CancelCurrentProcess, () => IsProcessing);
+            StopAllProcessingCommand = new RelayCommand(StopAllProcessing);
+
+            // Queue commands
+            RetryFailedItemCommand = new RelayCommand(RetryFailedItem, () => SelectedQueueItem != null && IsFailedStatus(SelectedQueueItem.Status));
+            RemoveQueueItemCommand = new RelayCommand(RemoveQueueItem, () => SelectedQueueItem != null);
+            ClearCompletedItemsCommand = new RelayCommand(ClearCompletedItems);
+
+            // Test run commands
+            LoadTestRunRssItemsCommand = new AsyncRelayCommand(LoadTestRunRssItemsAsync, () => TestRunSelectedShow != null);
+            StartTestRunCommand = new AsyncRelayCommand(StartTestRunAsync, () => TestRunSelectedEpisode != null && !IsProcessing && !IsTestRunning);
+            CancelTestRunCommand = new RelayCommand(CancelTestRun, () => IsTestRunning);
+
+            // Activity log
+            ClearActivityLogCommand = new RelayCommand(ClearActivityLog);
+
+            AddLogEntry("Automation system ready", ActivityLogLevel.Info);
+        }
+        
+        private void InitializeServices()
+        {
+            var settings = _getSettings();
+            
+            // QBittorrent
+            _qbitService = new QBittorrentService();
+            _qbitService.Configure(
+                settings.QBittorrent.LocalIpPort,
+                settings.QBittorrent.SeedboxIpPort,
+                settings.QBittorrent.SeedboxUsername,
+                settings.QBittorrent.SeedboxPassword
+            );
+            
+            // Encoding
+            _encodingService = new EncodingService
+            {
+                EncodingScriptsPath = settings.Folders.EncodingFolder,
+                OutputPath = settings.Folders.SeedingFolder
+            };
+            _encodingService.ProgressChanged += (s, p) => 
+            {
+                Application.Current.Dispatcher.Invoke(() => TestRunProgress = 20 + (p * 40)); // 20-60%
+            };
+            _encodingService.OutputReceived += (s, msg) => AddLogEntry($"[Encode] {msg}", ActivityLogLevel.Info);
+            
+            // Muxing
+            _muxingService = new MuxingService();
+            _muxingService.Configure(settings.Remuxer.MkvmergePath, settings.Remuxer.FfmpegPath);
+            _muxingService.LogMessage += (s, msg) => AddLogEntry($"[Mux] {msg}", ActivityLogLevel.Info);
+            
+            // Screenshots
+            _screenshotService = new ScreenshotService
+            {
+                OutputFolder = settings.Folders.ScreenshotsFolder
+            };
+            _screenshotService.Configure(settings.Remuxer.FfmpegPath, settings.ImgbbApiKey);
+            
+            // FTP
+            _ftpService = new FtpService();
+            _ftpService.Configure(
+                settings.Ftp.Host,
+                settings.Ftp.Username,
+                settings.Ftp.Password,
+                settings.Ftp.ReleasesPath,
+                settings.Ftp.TorrentsPath
+            );
+            _ftpService.ProgressChanged += (s, p) =>
+            {
+                Application.Current.Dispatcher.Invoke(() => TestRunProgress = 92 + (p * 5)); // 92-97%
+            };
+            
+            // Torrent
+            _torrentService = new TorrentService();
+            
+            // Nyaa
+            _nyaaService = new NyaaService();
+            _nyaaService.Configure(
+                settings.AutoPosting.NyaaCookieDdlg,
+                settings.AutoPosting.NyaaCookieSession,
+                settings.Discord.ServerInviteLink
+            );
+            
+            // Discord
+            _discordService = new DiscordService();
+            _discordService.Configure(
+                settings.Discord.WebhookUrl,
+                settings.MachineName,
+                settings.TestMode
+            );
+            
+            AddLogEntry("Services initialized", ActivityLogLevel.Info);
+        }
+
+        // ==================== COLLECTIONS ====================
+
+        public ObservableCollection<QueueItem> Queue { get; }
+        public ObservableCollection<RssItem> TestRunRssItems { get; }
+        public ObservableCollection<ActivityLogEntry> ActivityLog { get; }
+
+        // ==================== COMMANDS ====================
+
+        public ICommand StartMonitoringCommand { get; }
+        public ICommand StopMonitoringCommand { get; }
+        public ICommand PauseQueueCommand { get; }
+        public ICommand ResumeQueueCommand { get; }
+        public ICommand CancelCurrentProcessCommand { get; }
+        public ICommand StopAllProcessingCommand { get; }
+        public ICommand RetryFailedItemCommand { get; }
+        public ICommand RemoveQueueItemCommand { get; }
+        public ICommand ClearCompletedItemsCommand { get; }
+        public ICommand LoadTestRunRssItemsCommand { get; }
+        public ICommand StartTestRunCommand { get; }
+        public ICommand CancelTestRunCommand { get; }
+        public ICommand ClearActivityLogCommand { get; }
+
+        // ==================== TEST MODE PROPERTIES ====================
+
+        public bool IsSimulatedTest
+        {
+            get => _isSimulatedTest;
+            set
+            {
+                _isSimulatedTest = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsRealTest));
+                OnPropertyChanged(nameof(TestModeDescription));
+                OnPropertyChanged(nameof(CanSelectEncodeOptions));
+            }
+        }
+
+        public bool IsRealTest
+        {
+            get => !_isSimulatedTest;
+            set
+            {
+                _isSimulatedTest = !value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsSimulatedTest));
+                OnPropertyChanged(nameof(TestModeDescription));
+                OnPropertyChanged(nameof(CanSelectEncodeOptions));
+            }
+        }
+
+        public bool CanSelectEncodeOptions => !IsSimulatedTest;
+
+        // Encode type: Quick (5-min) vs Full
+        public bool IsQuickEncode
+        {
+            get => _isQuickEncode;
+            set
+            {
+                _isQuickEncode = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsFullEncode));
+                OnPropertyChanged(nameof(TestModeDescription));
+            }
+        }
+
+        public bool IsFullEncode
+        {
+            get => !_isQuickEncode;
+            set
+            {
+                _isQuickEncode = !value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsQuickEncode));
+                OnPropertyChanged(nameof(TestModeDescription));
+            }
+        }
+
+        // Post visibility: Hidden vs Public
+        public bool IsHiddenPost
+        {
+            get => _isHiddenPost;
+            set
+            {
+                _isHiddenPost = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsPublicPost));
+                OnPropertyChanged(nameof(TestModeDescription));
+            }
+        }
+
+        public bool IsPublicPost
+        {
+            get => !_isHiddenPost;
+            set
+            {
+                _isHiddenPost = !value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsHiddenPost));
+                OnPropertyChanged(nameof(TestModeDescription));
+            }
+        }
+
+        public string TestModeDescription
+        {
+            get
+            {
+                if (IsSimulatedTest)
+                    return "Simulates the full pipeline with timing delays. No actual files are processed.";
+                
+                var encodeType = IsQuickEncode ? "5-minute test encode" : "Full episode encode";
+                var postType = IsHiddenPost ? "post as HIDDEN" : "post as PUBLIC";
+                return $"Real pipeline: {encodeType}, {postType} on Nyaa.";
+            }
+        }
+
+        public bool IsTestRunning
+        {
+            get => _isTestRunning;
+            set
+            {
+                _isTestRunning = value;
+                OnPropertyChanged();
+                NotifyCommandsChanged();
+            }
+        }
+
+        public double TestRunProgress
+        {
+            get => _testRunProgress;
+            set
+            {
+                _testRunProgress = value;
+                OnPropertyChanged();
+            }
+        }
+
+        // ==================== MONITORING PROPERTIES ====================
+
+        public bool IsMonitoring
+        {
+            get => _isMonitoring;
+            set
+            {
+                _isMonitoring = value;
+                OnPropertyChanged();
+                UpdateMonitoringStatus();
+                NotifyCommandsChanged();
+            }
+        }
+
+        public bool IsPaused
+        {
+            get => _isPaused;
+            set
+            {
+                _isPaused = value;
+                OnPropertyChanged();
+                UpdateMonitoringStatus();
+                NotifyCommandsChanged();
+            }
+        }
+
+        public bool IsProcessing
+        {
+            get => _isProcessing;
+            set
+            {
+                _isProcessing = value;
+                OnPropertyChanged();
+                UpdateMonitoringStatus();
+                NotifyCommandsChanged();
+            }
+        }
+
+        public int RssCheckInterval
+        {
+            get => _rssCheckInterval;
+            set
+            {
+                _rssCheckInterval = Math.Max(1, Math.Min(60, value));
+                OnPropertyChanged();
+            }
+        }
+
+        public string MonitoringStatus
+        {
+            get => _monitoringStatus;
+            set { _monitoringStatus = value; OnPropertyChanged(); }
+        }
+
+        public string QueueSummary
+        {
+            get
+            {
+                var pending = Queue.Count(q => q.Status == QueueItemStatus.Pending);
+                var processing = Queue.Count(q => q.Status == QueueItemStatus.Downloading || 
+                                                   q.Status == QueueItemStatus.Encoding ||
+                                                   q.Status == QueueItemStatus.Muxing ||
+                                                   q.Status == QueueItemStatus.UploadingEpisode);
+                var completed = Queue.Count(q => q.Status == QueueItemStatus.Completed);
+                var failed = Queue.Count(q => IsFailedStatus(q.Status));
+
+                return $"Pending: {pending} | Processing: {processing} | Done: {completed} | Failed: {failed}";
+            }
+        }
+
+        public ShowViewModel? TestRunSelectedShow
+        {
+            get => _testRunSelectedShow;
+            set
+            {
+                _testRunSelectedShow = value;
+                OnPropertyChanged();
+                TestRunRssItems.Clear();
+                TestRunSelectedEpisode = null;
+                TestRunStatus = value != null ? $"Selected: {value.DisplayName} - Click 'Load Episodes'" : "Select a show";
+                ((AsyncRelayCommand)LoadTestRunRssItemsCommand).NotifyCanExecuteChanged();
+            }
+        }
+
+        public RssItem? TestRunSelectedEpisode
+        {
+            get => _testRunSelectedEpisode;
+            set
+            {
+                _testRunSelectedEpisode = value;
+                OnPropertyChanged();
+                if (value != null)
+                {
+                    TestRunStatus = $"Ready to test: {value.Title}";
+                }
+                ((AsyncRelayCommand)StartTestRunCommand).NotifyCanExecuteChanged();
+            }
+        }
+
+        public string TestRunStatus
+        {
+            get => _testRunStatus;
+            set { _testRunStatus = value; OnPropertyChanged(); }
+        }
+
+        public QueueItem? SelectedQueueItem
+        {
+            get => _selectedQueueItem;
+            set
+            {
+                _selectedQueueItem = value;
+                OnPropertyChanged();
+                ((RelayCommand)RetryFailedItemCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)RemoveQueueItemCommand).NotifyCanExecuteChanged();
+            }
+        }
+
+        // ==================== SMART RSS SCHEDULING ====================
+
+        /// <summary>
+        /// Gets the next release time for a show (today or next week)
+        /// </summary>
+        private DateTime? GetNextReleaseTime(ShowViewModel show)
+        {
+            if (!show.ReleaseDay.HasValue || string.IsNullOrEmpty(show.ReleaseTime))
+                return null;
+
+            if (!TimeSpan.TryParse(show.ReleaseTime, out var releaseTime))
+                return null;
+
+            var today = DateTime.Today;
+            var daysUntilRelease = ((int)show.ReleaseDay.Value - (int)today.DayOfWeek + 7) % 7;
+            
+            var nextRelease = today.AddDays(daysUntilRelease).Add(releaseTime);
+            
+            // If the release time already passed today, check if we should still monitor or wait for next week
+            if (nextRelease < DateTime.Now)
+            {
+                // Check if we're within the monitoring window (release time + 6 hours)
+                if (DateTime.Now < nextRelease.AddHours(6))
+                {
+                    return nextRelease; // Still in active monitoring window
+                }
+                // Otherwise, next week
+                nextRelease = nextRelease.AddDays(7);
+            }
+            
+            return nextRelease;
+        }
+
+        /// <summary>
+        /// Determines if it's time to check a show's RSS feed based on smart scheduling
+        /// </summary>
+        private bool ShouldCheckShow(ShowViewModel show, out string reason)
+        {
+            reason = "";
+            
+            if (!show.IsActive)
+            {
+                reason = "Show is inactive";
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(show.RssFeed))
+            {
+                reason = "No RSS feed configured";
+                return false;
+            }
+
+            var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
+            
+            // Get or create monitoring state
+            if (!_monitoringStates.TryGetValue(showId, out var state))
+            {
+                state = new ShowMonitoringState { ShowId = showId };
+                _monitoringStates[showId] = state;
+            }
+
+            var nextRelease = GetNextReleaseTime(show);
+            if (!nextRelease.HasValue)
+            {
+                reason = "No release schedule configured";
+                return false;
+            }
+
+            var now = DateTime.Now;
+
+            // Check if this is a new release window (next week started)
+            if (state.ReleaseWindowStart.HasValue)
+            {
+                var daysSinceWindowStart = (now - state.ReleaseWindowStart.Value).TotalDays;
+                if (daysSinceWindowStart >= 7)
+                {
+                    state.ResetForNewWeek();
+                    AddLogEntry($"New release week for {show.DisplayName}, resetting monitoring", ActivityLogLevel.Info);
+                }
+            }
+
+            // If we already found this week's episode, don't check
+            if (state.FoundThisWeek)
+            {
+                reason = "Already found this week's episode";
+                return false;
+            }
+
+            // Check if we're at or past the release time
+            if (now < nextRelease.Value)
+            {
+                var timeUntil = nextRelease.Value - now;
+                reason = $"Release in {timeUntil.Hours}h {timeUntil.Minutes}m";
+                return false;
+            }
+
+            // We're in the release window - initialize if needed
+            if (!state.ReleaseWindowStart.HasValue)
+            {
+                state.ReleaseWindowStart = nextRelease.Value;
+                state.NextScheduledCheck = now; // Check immediately
+                AddLogEntry($"Release window started for {show.DisplayName}", ActivityLogLevel.Info);
+            }
+
+            // Update interval based on how long we've been waiting
+            state.UpdateIntervalBasedOnElapsedTime();
+
+            // Check if it's time for next check
+            if (state.NextScheduledCheck.HasValue && now < state.NextScheduledCheck.Value)
+            {
+                var timeUntil = state.NextScheduledCheck.Value - now;
+                reason = $"Next check in {timeUntil.Minutes}m (interval: {state.CurrentInterval.TotalMinutes}m)";
+                return false;
+            }
+
+            reason = $"Checking (interval: {state.CurrentInterval.TotalMinutes}m)";
+            return true;
+        }
+
+        /// <summary>
+        /// Updates the monitoring state after checking a show's RSS
+        /// </summary>
+        private void UpdateShowMonitoringState(ShowViewModel show, bool foundNewEpisode)
+        {
+            var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
+            
+            if (!_monitoringStates.TryGetValue(showId, out var state))
+                return;
+
+            state.LastCheckTime = DateTime.Now;
+            state.CheckCount++;
+
+            if (foundNewEpisode)
+            {
+                state.FoundThisWeek = true;
+                state.NextScheduledCheck = null;
+                AddLogEntry($"Found new episode for {show.DisplayName}! Pausing checks until next week.", ActivityLogLevel.Success);
+            }
+            else
+            {
+                state.NextScheduledCheck = DateTime.Now.Add(state.CurrentInterval);
+                var elapsed = state.ReleaseWindowStart.HasValue 
+                    ? (DateTime.Now - state.ReleaseWindowStart.Value).TotalHours 
+                    : 0;
+                AddLogEntry($"{show.DisplayName}: No new episode. Next check in {state.CurrentInterval.TotalMinutes}m (waiting {elapsed:F1}h)", ActivityLogLevel.Info);
+            }
+        }
+
+        // ==================== MONITORING METHODS ====================
+
+        private void StartMonitoring()
+        {
+            IsMonitoring = true;
+            IsPaused = false;
+            
+            // Initialize monitoring states for all active shows
+            foreach (var show in _shows.Where(s => s.IsActive))
+            {
+                var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
+                if (!_monitoringStates.ContainsKey(showId))
+                {
+                    _monitoringStates[showId] = new ShowMonitoringState { ShowId = showId };
+                }
+            }
+            
+            AddLogEntry("Started smart RSS monitoring", ActivityLogLevel.Success);
+            LogNextCheckTimes();
+
+            _monitoringCts?.Dispose();
+            _monitoringCts = new CancellationTokenSource();
+            _ = MonitorRssFeedsAsync(_monitoringCts.Token);
+        }
+
+        private void LogNextCheckTimes()
+        {
+            foreach (var show in _shows.Where(s => s.IsActive && !string.IsNullOrEmpty(s.RssFeed)))
+            {
+                var nextRelease = GetNextReleaseTime(show);
+                if (nextRelease.HasValue)
+                {
+                    var timeUntil = nextRelease.Value - DateTime.Now;
+                    if (timeUntil.TotalSeconds > 0)
+                    {
+                        AddLogEntry($"  {show.DisplayName}: releases in {timeUntil.Hours}h {timeUntil.Minutes}m ({nextRelease.Value:ddd HH:mm})", ActivityLogLevel.Info);
+                    }
+                    else
+                    {
+                        AddLogEntry($"  {show.DisplayName}: in release window, checking now", ActivityLogLevel.Info);
+                    }
+                }
+            }
+        }
+
+        private void StopMonitoring()
+        {
+            _monitoringCts?.Cancel();
+            IsMonitoring = false;
+            IsPaused = false;
+            AddLogEntry("Stopped RSS monitoring", ActivityLogLevel.Warning);
+        }
+
+        private void PauseQueue()
+        {
+            IsPaused = true;
+            AddLogEntry("Queue processing paused", ActivityLogLevel.Warning);
+        }
+
+        private void ResumeQueue()
+        {
+            IsPaused = false;
+            AddLogEntry("Queue processing resumed", ActivityLogLevel.Success);
+        }
+
+        private void CancelCurrentProcess()
+        {
+            _currentProcessCts?.Cancel();
+            AddLogEntry("Cancelling current process...", ActivityLogLevel.Warning);
+        }
+
+        private void StopAllProcessing()
+        {
+            StopMonitoring();
+            _currentProcessCts?.Cancel();
+            
+            foreach (var item in Queue.Where(q => q.Status != QueueItemStatus.Completed && !IsFailedStatus(q.Status)))
+            {
+                item.Status = QueueItemStatus.Error;
+                item.StatusMessage = "Cancelled by user";
+            }
+            AddLogEntry("Stopped all processing", ActivityLogLevel.Error);
+            UpdateQueueSummary();
+        }
+
+        private async Task MonitorRssFeedsAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested && IsMonitoring)
+            {
+                if (!IsPaused)
+                {
+                    var activeShows = _shows.Where(s => s.IsActive && !string.IsNullOrEmpty(s.RssFeed)).ToList();
+                    var showsToCheck = new List<ShowViewModel>();
+                    
+                    foreach (var show in activeShows)
+                    {
+                        if (ShouldCheckShow(show, out var reason))
+                        {
+                            showsToCheck.Add(show);
+                        }
+                    }
+
+                    if (showsToCheck.Count > 0)
+                    {
+                        AddLogEntry($"Checking {showsToCheck.Count} RSS feed(s)...", ActivityLogLevel.Info);
+                        
+                        foreach (var show in showsToCheck)
+                        {
+                            if (cancellationToken.IsCancellationRequested) break;
+
+                            try
+                            {
+                                var foundNew = await CheckShowRssForNewEpisodeAsync(show, cancellationToken);
+                                UpdateShowMonitoringState(show, foundNew);
+                            }
+                            catch (Exception ex)
+                            {
+                                AddLogEntry($"Error checking {show.DisplayName}: {ex.Message}", ActivityLogLevel.Error);
+                                UpdateShowMonitoringState(show, false);
+                            }
+
+                            // Small delay between checks to be nice to servers
+                            await Task.Delay(1000, cancellationToken);
+                        }
+                    }
+                }
+
+                try
+                {
+                    // Main loop interval - check every minute to see if any shows need checking
+                    await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        private async Task<bool> CheckShowRssForNewEpisodeAsync(ShowViewModel show, CancellationToken cancellationToken)
+        {
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(15);
+            
+            var response = await client.GetStringAsync(show.RssFeed, cancellationToken);
+            var doc = XDocument.Parse(response);
+            var nyaaNs = XNamespace.Get("https://nyaa.si/xmlns/nyaa");
+
+            var items = doc.Descendants("item").ToList();
+            
+            // Get the expected next episode number
+            var releasedEpisodes = show.EpisodesReleased.Select(e => e.EpisodeNumber).ToHashSet();
+            var nextExpectedEpisode = releasedEpisodes.Count > 0 ? releasedEpisodes.Max() + 1 : 1;
+
+            foreach (var item in items)
+            {
+                var title = item.Element("title")?.Value ?? "";
+                
+                // Try to extract episode number and version from title
+                var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(title, show.CustomEpisodeRegex);
+                
+                if (episodeNumber.HasValue && episodeNumber.Value == nextExpectedEpisode)
+                {
+                    // Check if it matches our source group filter (if configured)
+                    if (!string.IsNullOrEmpty(show.SourceGroup) && !title.Contains(show.SourceGroup, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    AddLogEntry($"Found episode {episodeNumber}{(version > 1 ? $"v{version}" : "")} for {show.DisplayName}: {title}", ActivityLogLevel.Success);
+                    
+                    // Create queue item
+                    var link = item.Element("link")?.Value ?? "";
+                    var infoHash = item.Element(nyaaNs + "infoHash")?.Value ?? "";
+                    
+                    var queueItem = new QueueItem
+                    {
+                        Show = show.Model,
+                        EpisodeNumber = episodeNumber.Value,
+                        Version = version,
+                        Status = QueueItemStatus.Pending,
+                        StatusMessage = "Queued from RSS",
+                        TorrentHash = infoHash,
+                        SourceFileName = title
+                    };
+
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        Queue.Insert(0, queueItem);
+                        UpdateQueueSummary();
+                    });
+
+                    // Start processing if not already
+                    if (!IsProcessing)
+                    {
+                        _ = ProcessQueueAsync();
+                    }
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private (int? Episode, int Version) ExtractEpisodeNumberAndVersion(string title, string? customRegex)
+        {
+            int? episodeNumber = null;
+            int version = 1;
+
+            // Try custom regex first
+            if (!string.IsNullOrEmpty(customRegex))
+            {
+                try
+                {
+                    var match = Regex.Match(title, customRegex);
+                    if (match.Success && match.Groups.Count > 1 && int.TryParse(match.Groups[1].Value, out var ep))
+                    {
+                        episodeNumber = ep;
+                    }
+                }
+                catch { }
+            }
+
+            if (episodeNumber == null)
+            {
+                // Standard patterns for episode number
+                var patterns = new[]
+                {
+                    @"[- _](\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",   // - 01, - 01v2, _01, etc.
+                    @"E(\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",       // E01, E01v2
+                    @"Episode\s*(\d+)",                          // Episode 1
+                    @"Ep\.?\s*(\d+)",                            // Ep 1, Ep. 1
+                    @"#(\d+)",                                   // #01
+                    @"S\d+E(\d+)",                               // S01E01
+                };
+
+                foreach (var pattern in patterns)
+                {
+                    var match = Regex.Match(title, pattern, RegexOptions.IgnoreCase);
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out var ep))
+                    {
+                        episodeNumber = ep;
+                        break;
+                    }
+                }
+            }
+
+            // Extract version (v2, v3, etc.) - look for vN pattern near the episode number
+            var versionMatch = Regex.Match(title, @"[- _](\d{2,3})v(\d)", RegexOptions.IgnoreCase);
+            if (versionMatch.Success && int.TryParse(versionMatch.Groups[2].Value, out var ver))
+            {
+                version = ver;
+                // Also use the episode number from this match if we haven't found one yet
+                if (episodeNumber == null && int.TryParse(versionMatch.Groups[1].Value, out var ep))
+                {
+                    episodeNumber = ep;
+                }
+            }
+
+            return (episodeNumber, version);
+        }
+
+        // Keep backward compatible method
+        private int? ExtractEpisodeNumber(string title, string? customRegex)
+        {
+            return ExtractEpisodeNumberAndVersion(title, customRegex).Episode;
+        }
+
+        private void UpdateMonitoringStatus()
+        {
+            if (!IsMonitoring)
+                MonitoringStatus = "Stopped";
+            else if (IsPaused)
+                MonitoringStatus = "Paused";
+            else if (IsProcessing)
+                MonitoringStatus = "Processing";
+            else
+                MonitoringStatus = "Monitoring";
+        }
+
+        // ==================== QUEUE PROCESSING ====================
+
+        private async Task ProcessQueueAsync()
+        {
+            if (IsProcessing) return;
+            
+            IsProcessing = true;
+            _currentProcessCts?.Dispose();
+            _currentProcessCts = new CancellationTokenSource();
+
+            try
+            {
+                while (Queue.Any(q => q.Status == QueueItemStatus.Pending) && !_currentProcessCts.Token.IsCancellationRequested)
+                {
+                    if (IsPaused)
+                    {
+                        await Task.Delay(1000);
+                        continue;
+                    }
+
+                    var nextItem = Queue.FirstOrDefault(q => q.Status == QueueItemStatus.Pending);
+                    if (nextItem == null) break;
+
+                    await ProcessQueueItemAsync(nextItem, _currentProcessCts.Token);
+                }
+            }
+            finally
+            {
+                IsProcessing = false;
+            }
+        }
+
+        private async Task ProcessQueueItemAsync(QueueItem item, CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Stage 1: Download
+                item.Status = QueueItemStatus.Downloading;
+                item.StatusMessage = "Downloading torrent...";
+                item.StartedAt = DateTime.Now;
+                AddLogEntry($"Downloading: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with QBittorrentService
+                await SimulateStageAsync(item, 0, 0.2, 5000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                item.Status = QueueItemStatus.DownloadComplete;
+                item.StatusMessage = "Download complete";
+
+                // Stage 2: Analyze Tracks
+                item.Status = QueueItemStatus.AnalyzingTracks;
+                item.StatusMessage = "Analyzing audio/subtitle tracks...";
+                AddLogEntry($"Analyzing tracks: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with MuxingService.AnalyzeSourceFile
+                await SimulateStageAsync(item, 0.2, 0.25, 2000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 3: Encode
+                item.Status = QueueItemStatus.Encoding;
+                var encodeDuration = item.IsTestRun ? "5 minutes" : "full episode";
+                item.StatusMessage = $"Encoding ({encodeDuration})...";
+                AddLogEntry($"Encoding: {item.OutputFileName} ({encodeDuration})", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with EncodingService
+                var encodeTime = item.IsTestRun ? 10000 : 30000; // Simulated
+                await SimulateStageAsync(item, 0.25, 0.7, encodeTime, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                item.Status = QueueItemStatus.EncodingComplete;
+                item.StatusMessage = "Encoding complete";
+
+                // Stage 4: Mux
+                item.Status = QueueItemStatus.Muxing;
+                item.StatusMessage = "Muxing final file...";
+                AddLogEntry($"Muxing: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with MuxingService
+                await SimulateStageAsync(item, 0.7, 0.75, 3000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 5: Screenshots
+                item.Status = QueueItemStatus.TakingScreenshots;
+                item.StatusMessage = "Taking screenshots...";
+                AddLogEntry($"Taking screenshots: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with ScreenshotService
+                await SimulateStageAsync(item, 0.75, 0.8, 3000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 6: Upload Screenshots
+                item.Status = QueueItemStatus.UploadingScreenshots;
+                item.StatusMessage = "Uploading screenshots to ImgBB...";
+                AddLogEntry($"Uploading screenshots: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with ScreenshotService.UploadToImgBB
+                await SimulateStageAsync(item, 0.8, 0.85, 2000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 7: Generate Description
+                item.Status = QueueItemStatus.GeneratingDescription;
+                item.StatusMessage = "Generating Nyaa description...";
+                AddLogEntry($"Generating description: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with NyaaService
+                await SimulateStageAsync(item, 0.85, 0.87, 1000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 8: Create Torrent
+                item.Status = QueueItemStatus.CreatingTorrent;
+                item.StatusMessage = "Creating torrent file...";
+                AddLogEntry($"Creating torrent: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with TorrentService
+                await SimulateStageAsync(item, 0.87, 0.9, 2000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 9: Upload to Server
+                item.Status = QueueItemStatus.UploadingEpisode;
+                item.StatusMessage = "Uploading to seedbox...";
+                AddLogEntry($"Uploading to seedbox: {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with FtpService
+                await SimulateStageAsync(item, 0.9, 0.95, 5000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Stage 10: Post to Nyaa
+                item.Status = QueueItemStatus.PostingToNyaa;
+                var postType = item.IsTestRun ? "HIDDEN" : "public";
+                item.StatusMessage = $"Posting to Nyaa ({postType})...";
+                AddLogEntry($"Posting to Nyaa ({postType}): {item.OutputFileName}", ActivityLogLevel.Info);
+                
+                // TODO: Integrate with NyaaService
+                await SimulateStageAsync(item, 0.95, 1.0, 2000, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // Complete!
+                item.Status = QueueItemStatus.Completed;
+                item.StatusMessage = item.IsTestRun ? "Test run completed!" : "Released!";
+                item.CompletedAt = DateTime.Now;
+                
+                var duration = item.CompletedAt.Value - item.StartedAt!.Value;
+                AddLogEntry($"✅ Completed: {item.OutputFileName} in {duration.TotalMinutes:F1} minutes", ActivityLogLevel.Success);
+
+                // Send Discord notification
+                // TODO: Integrate with DiscordService
+
+                UpdateQueueSummary();
+            }
+            catch (TaskCanceledException)
+            {
+                item.Status = QueueItemStatus.Error;
+                item.StatusMessage = "Cancelled";
+                AddLogEntry($"Cancelled: {item.OutputFileName}", ActivityLogLevel.Warning);
+            }
+            catch (Exception ex)
+            {
+                item.Status = QueueItemStatus.Error;
+                item.StatusMessage = $"Error: {ex.Message}";
+                item.LastError = ex.ToString();
+                AddLogEntry($"Error processing {item.OutputFileName}: {ex.Message}", ActivityLogLevel.Error);
+            }
+        }
+
+        private async Task SimulateStageAsync(QueueItem item, double startProgress, double endProgress, int durationMs, CancellationToken cancellationToken)
+        {
+            var steps = 20;
+            var stepDelay = durationMs / steps;
+            var progressStep = (endProgress - startProgress) / steps;
+
+            for (int i = 0; i <= steps; i++)
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                
+                item.EncodeProgress = startProgress + (progressStep * i);
+                await Task.Delay(stepDelay, cancellationToken);
+            }
+        }
+
+        // ==================== QUEUE MANAGEMENT ====================
+
+        private void RetryFailedItem()
+        {
+            if (SelectedQueueItem == null || !IsFailedStatus(SelectedQueueItem.Status)) return;
+
+            SelectedQueueItem.Status = QueueItemStatus.Pending;
+            SelectedQueueItem.StatusMessage = "Queued for retry";
+            SelectedQueueItem.LastError = "";
+            AddLogEntry($"Retrying: {SelectedQueueItem.OutputFileName}", ActivityLogLevel.Info);
+            UpdateQueueSummary();
+
+            if (!IsProcessing)
+            {
+                _ = ProcessQueueAsync();
+            }
+        }
+
+        private void RemoveQueueItem()
+        {
+            if (SelectedQueueItem == null) return;
+
+            var name = SelectedQueueItem.OutputFileName;
+            Queue.Remove(SelectedQueueItem);
+            SelectedQueueItem = null;
+            AddLogEntry($"Removed from queue: {name}", ActivityLogLevel.Info);
+            UpdateQueueSummary();
+        }
+
+        private void ClearCompletedItems()
+        {
+            var completed = Queue.Where(q => q.Status == QueueItemStatus.Completed).ToList();
+            foreach (var item in completed)
+            {
+                Queue.Remove(item);
+            }
+            AddLogEntry($"Cleared {completed.Count} completed items", ActivityLogLevel.Info);
+            UpdateQueueSummary();
+        }
+
+        private void UpdateQueueSummary()
+        {
+            OnPropertyChanged(nameof(QueueSummary));
+        }
+
+        private static bool IsFailedStatus(QueueItemStatus status)
+        {
+            return status == QueueItemStatus.Error ||
+                   status == QueueItemStatus.DownloadFailed ||
+                   status == QueueItemStatus.EncodingFailed ||
+                   status == QueueItemStatus.MuxingFailed ||
+                   status == QueueItemStatus.UploadFailed;
+        }
+
+        // ==================== TEST RUN ====================
+
+        private async Task LoadTestRunRssItemsAsync()
+        {
+            if (TestRunSelectedShow == null || string.IsNullOrEmpty(TestRunSelectedShow.RssFeed))
+            {
+                TestRunStatus = "No RSS feed configured for this show";
+                return;
+            }
+
+            TestRunStatus = "Loading RSS feed...";
+            TestRunRssItems.Clear();
+
+            try
+            {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(15);
+                var response = await client.GetStringAsync(TestRunSelectedShow.RssFeed);
+
+                var doc = XDocument.Parse(response);
+                var nyaaNs = XNamespace.Get("https://nyaa.si/xmlns/nyaa");
+
+                var items = doc.Descendants("item").Take(20).ToList();
+
+                foreach (var item in items)
+                {
+                    var rssItem = new RssItem
+                    {
+                        Title = item.Element("title")?.Value ?? "Unknown",
+                        Link = item.Element("link")?.Value ?? "",
+                        TorrentUrl = item.Element("link")?.Value ?? "",
+                        InfoHash = item.Element(nyaaNs + "infoHash")?.Value ?? ""
+                    };
+
+                    if (DateTime.TryParse(item.Element("pubDate")?.Value, out var pubDate))
+                    {
+                        rssItem.PublishDate = pubDate;
+                    }
+
+                    if (long.TryParse(item.Element(nyaaNs + "size")?.Value, out var size))
+                    {
+                        rssItem.Size = size;
+                    }
+
+                    TestRunRssItems.Add(rssItem);
+                }
+
+                TestRunStatus = $"Loaded {TestRunRssItems.Count} episodes from RSS";
+                AddLogEntry($"Loaded {TestRunRssItems.Count} items from {TestRunSelectedShow.DisplayName} RSS", ActivityLogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                TestRunStatus = $"Error: {ex.Message}";
+                AddLogEntry($"Failed to load RSS: {ex.Message}", ActivityLogLevel.Error);
+            }
+        }
+
+        private async Task StartTestRunAsync()
+        {
+            if (TestRunSelectedShow == null || TestRunSelectedEpisode == null) return;
+
+            var show = TestRunSelectedShow;
+            var episode = TestRunSelectedEpisode;
+
+            IsTestRunning = true;
+            TestRunProgress = 0;
+            _testRunCts?.Dispose();
+            _testRunCts = new CancellationTokenSource();
+
+            try
+            {
+                var modeText = IsSimulatedTest ? "SIMULATED" : "REAL";
+                TestRunStatus = $"Starting {modeText} test run...";
+                AddLogEntry($"🧪 Starting {modeText} TEST RUN: {episode.Title}", ActivityLogLevel.Success);
+                
+                if (IsSimulatedTest)
+                {
+                    AddLogEntry("Simulating: Download → Encode 5min → Screenshots → Upload → Post as HIDDEN", ActivityLogLevel.Info);
+                    await RunSimulatedTestAsync(show, episode, _testRunCts.Token);
+                }
+                else
+                {
+                    AddLogEntry("Real pipeline: Download → Encode 5min → Mux → Screenshots → Upload → Post as HIDDEN", ActivityLogLevel.Info);
+                    await RunRealTestAsync(show, episode, _testRunCts.Token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                TestRunStatus = "❌ Test run cancelled";
+                AddLogEntry("Test run cancelled by user", ActivityLogLevel.Warning);
+            }
+            catch (Exception ex)
+            {
+                TestRunStatus = $"❌ Test run failed: {ex.Message}";
+                AddLogEntry($"Test run error: {ex.Message}", ActivityLogLevel.Error);
+            }
+            finally
+            {
+                IsTestRunning = false;
+                _testRunCts?.Dispose();
+                _testRunCts = null;
+            }
+        }
+
+        private void CancelTestRun()
+        {
+            _testRunCts?.Cancel();
+            AddLogEntry("Cancelling test run...", ActivityLogLevel.Warning);
+        }
+
+        private async Task RunSimulatedTestAsync(ShowViewModel show, RssItem episode, CancellationToken ct)
+        {
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+
+            var queueItem = new QueueItem
+            {
+                Show = show.Model,
+                EpisodeNumber = episodeNumber ?? 1,
+                Version = version,
+                Status = QueueItemStatus.Pending,
+                StatusMessage = "Queued for simulated test",
+                IsTestRun = true,
+                TestEncodeDurationSeconds = 300,
+                TorrentHash = episode.InfoHash,
+                SourceFileName = episode.Title
+            };
+
+            Queue.Insert(0, queueItem);
+            UpdateQueueSummary();
+
+            // Simulate each stage
+            var stages = new[]
+            {
+                (QueueItemStatus.Downloading, "Downloading torrent...", 0.0, 15.0),
+                (QueueItemStatus.DownloadComplete, "Download complete", 15.0, 15.0),
+                (QueueItemStatus.AnalyzingTracks, "Analyzing audio/subtitle tracks...", 15.0, 20.0),
+                (QueueItemStatus.Encoding, "Encoding (5 min test)...", 20.0, 60.0),
+                (QueueItemStatus.EncodingComplete, "Encoding complete", 60.0, 60.0),
+                (QueueItemStatus.Muxing, "Muxing final file...", 60.0, 70.0),
+                (QueueItemStatus.TakingScreenshots, "Taking screenshots...", 70.0, 78.0),
+                (QueueItemStatus.UploadingScreenshots, "Uploading screenshots to ImgBB...", 78.0, 85.0),
+                (QueueItemStatus.GeneratingDescription, "Generating Nyaa description...", 85.0, 88.0),
+                (QueueItemStatus.CreatingTorrent, "Creating torrent file...", 88.0, 92.0),
+                (QueueItemStatus.UploadingEpisode, "Uploading to seedbox...", 92.0, 97.0),
+                (QueueItemStatus.PostingToNyaa, "Posting to Nyaa (HIDDEN)...", 97.0, 100.0),
+            };
+
+            queueItem.StartedAt = DateTime.Now;
+
+            foreach (var (status, message, startProg, endProg) in stages)
+            {
+                ct.ThrowIfCancellationRequested();
+                
+                queueItem.Status = status;
+                queueItem.StatusMessage = message;
+                TestRunStatus = message;
+                AddLogEntry($"[SIM] {message}", ActivityLogLevel.Info);
+
+                // Animate progress
+                var progRange = endProg - startProg;
+                for (int i = 0; i <= 10; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    TestRunProgress = startProg + (progRange * i / 10);
+                    queueItem.EncodeProgress = TestRunProgress / 100;
+                    await Task.Delay(100, ct);
+                }
+            }
+
+            queueItem.Status = QueueItemStatus.Completed;
+            queueItem.StatusMessage = "Simulated test completed!";
+            queueItem.CompletedAt = DateTime.Now;
+            TestRunProgress = 100;
+            
+            var duration = queueItem.CompletedAt.Value - queueItem.StartedAt!.Value;
+            TestRunStatus = $"✅ Simulated test completed in {duration.TotalSeconds:F0}s";
+            AddLogEntry($"✅ Simulated test completed in {duration.TotalSeconds:F0}s", ActivityLogLevel.Success);
+            UpdateQueueSummary();
+        }
+
+        private async Task RunRealTestAsync(ShowViewModel show, RssItem episode, CancellationToken ct)
+        {
+            // Initialize services if not already done
+            if (_qbitService == null)
+            {
+                InitializeServices();
+            }
+
+            var settings = _getSettings();
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+            
+            AddLogEntry($"Extracted from '{episode.Title}': Episode {episodeNumber ?? 0}, Version {version}", ActivityLogLevel.Info);
+
+            // IsTestRun controls whether EncodingService uses 5-min ffmpeg (true) or full PowerShell (false)
+            var queueItem = new QueueItem
+            {
+                Show = show.Model,
+                EpisodeNumber = episodeNumber ?? 1,
+                Version = version,
+                Status = QueueItemStatus.Pending,
+                StatusMessage = IsQuickEncode ? "Queued for quick test" : "Queued for full encode",
+                IsTestRun = IsQuickEncode,  // Quick = 5-min ffmpeg, Full = PowerShell script
+                TestEncodeDurationSeconds = 300,
+                TorrentHash = episode.InfoHash,
+                SourceFileName = episode.Title
+            };
+
+            Queue.Insert(0, queueItem);
+            UpdateQueueSummary();
+            queueItem.StartedAt = DateTime.Now;
+
+            // Log the run configuration
+            var encodeType = IsQuickEncode ? "Quick (5-min)" : "Full episode";
+            var postVisibility = IsHiddenPost ? "HIDDEN" : "PUBLIC";
+            AddLogEntry($"🚀 Starting {encodeType} encode, will post as {postVisibility}", ActivityLogLevel.Info);
+
+            try
+            {
+                // ==================== STAGE 1: Download ====================
+                queueItem.Status = QueueItemStatus.Downloading;
+                queueItem.StatusMessage = "Adding torrent to qBittorrent...";
+                TestRunStatus = "Downloading torrent...";
+                TestRunProgress = 0;
+                AddLogEntry($"📥 Adding torrent: {episode.Title}", ActivityLogLevel.Info);
+
+                // Send Discord notification - Episode grabbed
+                await _discordService?.SendEpisodeGrabbedAsync(queueItem)!;
+
+                var downloadPath = Path.Combine(settings.Folders.TempFolder, "Downloads");
+                Directory.CreateDirectory(downloadPath);
+
+                // Add torrent to local qBittorrent
+                var torrentAdded = await _qbitService!.AddTorrentAsync(episode.Link, downloadPath, isLocal: true);
+                if (!torrentAdded)
+                {
+                    throw new Exception("Failed to add torrent to qBittorrent");
+                }
+
+                // Wait a moment for qBittorrent to process the torrent
+                await Task.Delay(2000, ct);
+
+                // Wait for download to complete (poll every 5 seconds)
+                AddLogEntry("Waiting for download to complete...", ActivityLogLevel.Info);
+                var downloadComplete = false;
+                var downloadTimeout = DateTime.Now.AddMinutes(30);
+                TorrentInfo? torrentInfo = null;
+                
+                while (!downloadComplete && DateTime.Now < downloadTimeout)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    
+                    torrentInfo = await _qbitService.GetTorrentInfoAsync(episode.InfoHash, isLocal: true);
+                    if (torrentInfo == null)
+                    {
+                        AddLogEntry($"⚠️ Torrent not found by hash, waiting...", ActivityLogLevel.Warning);
+                        await Task.Delay(5000, ct);
+                        continue;
+                    }
+                    
+                    var progress = torrentInfo.Progress;
+                    TestRunProgress = progress * 15; // 0-15%
+                    queueItem.DownloadProgress = progress;
+                    queueItem.StatusMessage = $"Downloading... {progress:P0}";
+                    
+                    if (progress >= 1.0)
+                    {
+                        downloadComplete = true;
+                        AddLogEntry($"Download complete. Content path: {torrentInfo.ContentPath}", ActivityLogLevel.Info);
+                    }
+                    else
+                    {
+                        await Task.Delay(5000, ct);
+                    }
+                }
+
+                if (!downloadComplete || torrentInfo == null)
+                {
+                    throw new Exception("Download timed out after 30 minutes");
+                }
+
+                // Wait a moment for files to be fully written to disk
+                await Task.Delay(2000, ct);
+
+                // Use the content path from qBittorrent
+                string? videoFilePath = null;
+                var contentPath = torrentInfo.ContentPath;
+                
+                if (File.Exists(contentPath))
+                {
+                    // Content path is a single file
+                    var ext = Path.GetExtension(contentPath).ToLowerInvariant();
+                    if (ext == ".mkv" || ext == ".mp4")
+                    {
+                        videoFilePath = contentPath;
+                    }
+                }
+                else if (Directory.Exists(contentPath))
+                {
+                    // Content path is a folder - search for video files
+                    var videoFiles = Directory.GetFiles(contentPath, "*.mkv", SearchOption.AllDirectories)
+                        .Concat(Directory.GetFiles(contentPath, "*.mp4", SearchOption.AllDirectories))
+                        .OrderByDescending(f => new FileInfo(f).Length)
+                        .ToList();
+                    
+                    if (videoFiles.Count > 0)
+                    {
+                        videoFilePath = videoFiles.First();
+                    }
+                }
+
+                // Fallback: search in download path
+                if (string.IsNullOrEmpty(videoFilePath))
+                {
+                    AddLogEntry($"Content path didn't contain video, searching in: {downloadPath}", ActivityLogLevel.Warning);
+                    var downloadedFiles = Directory.GetFiles(downloadPath, "*.mkv", SearchOption.AllDirectories)
+                        .Concat(Directory.GetFiles(downloadPath, "*.mp4", SearchOption.AllDirectories))
+                        .OrderByDescending(f => new FileInfo(f).Length)
+                        .ToList();
+                    
+                    if (downloadedFiles.Count > 0)
+                    {
+                        videoFilePath = downloadedFiles.First();
+                    }
+                }
+
+                if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
+                {
+                    throw new Exception($"No video file found after download. Content path: {contentPath}, Download path: {downloadPath}");
+                }
+
+                queueItem.SourceFilePath = videoFilePath;
+                queueItem.SourceFileSizeBytes = new FileInfo(queueItem.SourceFilePath).Length;
+                
+                // Extract source group from filename (e.g., [SubsPlease] -> SubsPlease)
+                var sourceFileName = Path.GetFileName(queueItem.SourceFilePath);
+                var groupMatch = System.Text.RegularExpressions.Regex.Match(sourceFileName, @"\[([^\]]+)\]");
+                if (groupMatch.Success)
+                {
+                    queueItem.SourceGroup = groupMatch.Groups[1].Value;
+                    AddLogEntry($"Source group: {queueItem.SourceGroup}", ActivityLogLevel.Info);
+                }
+                
+                AddLogEntry($"✅ Downloaded: {sourceFileName} ({queueItem.SourceFileSizeFormatted})", ActivityLogLevel.Success);
+                
+                // Send Discord notification - Download complete
+                await _discordService?.SendDownloadCompleteAsync(queueItem)!;
+                
+                // Remove torrent from qBittorrent (keep files)
+                AddLogEntry("Removing torrent from qBittorrent...", ActivityLogLevel.Info);
+                await _qbitService.DeleteTorrentAsync(episode.InfoHash, deleteFiles: false, isLocal: true);
+                
+                // Move source file to encoding folder for the PowerShell script
+                var encodingFolder = settings.Folders.EncodingFolder;
+                var encodingSourcePath = Path.Combine(encodingFolder, sourceFileName);
+                
+                // Create encoding subdirectories if they don't exist
+                Directory.CreateDirectory(Path.Combine(encodingFolder, "video"));
+                Directory.CreateDirectory(Path.Combine(encodingFolder, "audio-subs"));
+                Directory.CreateDirectory(Path.Combine(encodingFolder, "data"));
+                Directory.CreateDirectory(Path.Combine(encodingFolder, "done"));
+                
+                if (queueItem.SourceFilePath != encodingSourcePath)
+                {
+                    AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
+                    
+                    // Delete existing file if present
+                    if (File.Exists(encodingSourcePath))
+                    {
+                        File.Delete(encodingSourcePath);
+                    }
+                    
+                    // Move the file
+                    File.Move(queueItem.SourceFilePath, encodingSourcePath);
+                    queueItem.SourceFilePath = encodingSourcePath;
+                    AddLogEntry($"Source file moved to: {encodingSourcePath}", ActivityLogLevel.Info);
+                }
+                
+                queueItem.Status = QueueItemStatus.DownloadComplete;
+                TestRunProgress = 15;
+
+                // ==================== STAGE 2: Analyze Tracks ====================
+                queueItem.Status = QueueItemStatus.AnalyzingTracks;
+                queueItem.StatusMessage = "Analyzing audio/subtitle tracks...";
+                TestRunStatus = "Analyzing tracks...";
+                TestRunProgress = 16;
+                AddLogEntry($"🔍 Analyzing tracks in: {Path.GetFileName(queueItem.SourceFilePath)}", ActivityLogLevel.Info);
+
+                var (audioTracks, subtitleTracks) = await _muxingService!.AnalyzeTracksAsync(queueItem.SourceFilePath);
+                queueItem.AudioTracks = audioTracks;
+                queueItem.SubtitleTracks = subtitleTracks;
+                
+                AddLogEntry($"Found {audioTracks.Count} audio track(s), {subtitleTracks.Count} subtitle track(s)", ActivityLogLevel.Info);
+                TestRunProgress = 20;
+
+                // ==================== STAGE 3: Encode ====================
+                queueItem.Status = QueueItemStatus.Encoding;
+                if (IsQuickEncode)
+                {
+                    queueItem.StatusMessage = "Encoding (5 minute test)...";
+                    TestRunStatus = "Encoding (5 min)...";
+                    AddLogEntry($"🎬 Starting 5-minute test encode...", ActivityLogLevel.Info);
+                }
+                else
+                {
+                    queueItem.StatusMessage = "Encoding full episode...";
+                    TestRunStatus = "Encoding (full)...";
+                    AddLogEntry($"🎬 Starting full episode encode (this may take a while)...", ActivityLogLevel.Info);
+                }
+
+                // Send Discord notification - Encode started
+                await _discordService?.SendEncodingStartedAsync(queueItem, IsQuickEncode)!;
+
+                var workerConfigPath = Path.Combine(settings.Folders.EncodingFolder, "WorkerConfig.ini");
+                var encodeResult = await _encodingService!.EncodeAsync(queueItem, workerConfigPath, ct);
+
+                if (!encodeResult.Success)
+                {
+                    throw new Exception($"Encoding failed: {encodeResult.ErrorMessage}");
+                }
+
+                queueItem.EncodedFilePath = encodeResult.OutputFilePath;
+                AddLogEntry($"✅ Encoding complete: {Path.GetFileName(encodeResult.OutputFilePath)} ({encodeResult.FileSizeFormatted})", ActivityLogLevel.Success);
+                queueItem.Status = QueueItemStatus.EncodingComplete;
+                TestRunProgress = 60;
+
+                // Send Discord notification - Encode complete
+                var encodeDuration = encodeResult.Duration;
+                await _discordService?.SendEncodingCompleteAsync(queueItem, encodeDuration, encodeResult.FileSizeFormatted)!;
+
+                // ==================== CLEANUP: Remove source file and LWI files ====================
+                AddLogEntry("🧹 Cleaning up source files...", ActivityLogLevel.Info);
+                try
+                {
+                    // Delete source file from encoding folder
+                    if (File.Exists(queueItem.SourceFilePath))
+                    {
+                        File.Delete(queueItem.SourceFilePath);
+                        AddLogEntry($"Deleted source: {Path.GetFileName(queueItem.SourceFilePath)}", ActivityLogLevel.Info);
+                    }
+                    
+                    // Delete any LWI files in encoding folder
+                    var lwiFiles = Directory.GetFiles(settings.Folders.EncodingFolder, "*.lwi", SearchOption.TopDirectoryOnly);
+                    foreach (var lwi in lwiFiles)
+                    {
+                        File.Delete(lwi);
+                        AddLogEntry($"Deleted LWI: {Path.GetFileName(lwi)}", ActivityLogLevel.Info);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AddLogEntry($"⚠️ Cleanup warning: {ex.Message}", ActivityLogLevel.Warning);
+                }
+
+                // ==================== STAGE 4: Mux ====================
+                queueItem.Status = QueueItemStatus.Muxing;
+                queueItem.StatusMessage = "Muxing final file...";
+                TestRunStatus = "Muxing...";
+                AddLogEntry($"🔧 Muxing final file...", ActivityLogLevel.Info);
+
+                var muxOutputPath = Path.Combine(settings.Folders.SeedingFolder, $"{queueItem.OutputFileName}.mkv");
+                
+                // Ensure output directory exists
+                Directory.CreateDirectory(settings.Folders.SeedingFolder);
+                
+                MuxingResult muxResult;
+                
+                if (queueItem.IsTestRun)
+                {
+                    // Quick test (5-min ffmpeg): output file already contains video + audio + subs
+                    // Just need to ensure it's in the right place
+                    AddLogEntry("Quick test: File already muxed by ffmpeg", ActivityLogLevel.Info);
+                    
+                    try
+                    {
+                        // Check if encoded file is already at the target path
+                        var encodedPath = queueItem.EncodedFilePath;
+                        var normalizedEncodedPath = Path.GetFullPath(encodedPath).ToLowerInvariant();
+                        var normalizedMuxPath = Path.GetFullPath(muxOutputPath).ToLowerInvariant();
+                        
+                        if (normalizedEncodedPath == normalizedMuxPath)
+                        {
+                            // File is already in the right place
+                            AddLogEntry($"Encoded file already at output path", ActivityLogLevel.Info);
+                            muxResult = new MuxingResult
+                            {
+                                Success = true,
+                                OutputPath = muxOutputPath,
+                                FileSize = new FileInfo(muxOutputPath).Length
+                            };
+                        }
+                        else
+                        {
+                            // Need to move/copy the file
+                            if (File.Exists(muxOutputPath))
+                            {
+                                File.Delete(muxOutputPath);
+                            }
+                            
+                            // Use Move if on same drive, otherwise Copy
+                            if (Path.GetPathRoot(encodedPath) == Path.GetPathRoot(muxOutputPath))
+                            {
+                                File.Move(encodedPath, muxOutputPath);
+                            }
+                            else
+                            {
+                                File.Copy(encodedPath, muxOutputPath);
+                            }
+                            
+                            muxResult = new MuxingResult
+                            {
+                                Success = true,
+                                OutputPath = muxOutputPath,
+                                FileSize = new FileInfo(muxOutputPath).Length
+                            };
+                        }
+                        AddLogEntry($"✅ Quick test mux complete: {muxResult.FileSizeFormatted}", ActivityLogLevel.Success);
+                    }
+                    catch (Exception ex)
+                    {
+                        muxResult = new MuxingResult
+                        {
+                            Success = false,
+                            ErrorMessage = ex.Message
+                        };
+                    }
+                }
+                else
+                {
+                    // Full encode: PowerShell script muxed but without proper track names
+                    // We need to remux to apply Judas track naming conventions
+                    AddLogEntry("Full encode: Remuxing with proper track names...", ActivityLogLevel.Info);
+                    
+                    // Analyze the encoded file to get track info
+                    var (encodedAudioTracks, encodedSubtitleTracks) = await _muxingService!.AnalyzeTracksAsync(queueItem.EncodedFilePath);
+                    queueItem.AudioTracks = encodedAudioTracks;
+                    queueItem.SubtitleTracks = encodedSubtitleTracks;
+                    AddLogEntry($"Found {encodedAudioTracks.Count} audio, {encodedSubtitleTracks.Count} subtitle tracks for naming", ActivityLogLevel.Info);
+                    
+                    // Do a proper remux with track naming
+                    // For full encode, the video/audio/subs are all in the same file from PowerShell
+                    muxResult = await _muxingService.RemuxWithTrackNamesAsync(
+                        queueItem.EncodedFilePath,
+                        muxOutputPath,
+                        queueItem,
+                        ct);
+                    
+                    // If remux succeeded and output is different from input, clean up the PS output
+                    if (muxResult.Success && queueItem.EncodedFilePath != muxOutputPath)
+                    {
+                        try
+                        {
+                            if (File.Exists(queueItem.EncodedFilePath))
+                            {
+                                File.Delete(queueItem.EncodedFilePath);
+                                AddLogEntry($"Cleaned up intermediate file", ActivityLogLevel.Info);
+                            }
+                        }
+                        catch { }
+                    }
+                    
+                    if (muxResult.Success)
+                    {
+                        AddLogEntry($"✅ Full encode mux complete: {muxResult.FileSizeFormatted}", ActivityLogLevel.Success);
+                    }
+                }
+                
+                if (!muxResult.Success)
+                {
+                    throw new Exception($"Muxing failed: {muxResult.ErrorMessage}");
+                }
+
+                queueItem.MuxedFilePath = muxResult.OutputPath;
+                AddLogEntry($"✅ Muxed: {Path.GetFileName(muxResult.OutputPath)}", ActivityLogLevel.Success);
+                TestRunProgress = 70;
+
+                // ==================== STAGE 5: Screenshots ====================
+                queueItem.Status = QueueItemStatus.TakingScreenshots;
+                queueItem.StatusMessage = "Taking screenshots...";
+                TestRunStatus = "Taking screenshots...";
+                AddLogEntry($"📸 Taking screenshots...", ActivityLogLevel.Info);
+
+                var screenshotPaths = await _screenshotService!.TakeScreenshotsAsync(queueItem.MuxedFilePath, 3);
+                queueItem.ScreenshotPaths = screenshotPaths;
+                AddLogEntry($"✅ Captured {screenshotPaths.Count} screenshots", ActivityLogLevel.Success);
+                TestRunProgress = 78;
+
+                // ==================== STAGE 6: Upload Screenshots ====================
+                queueItem.Status = QueueItemStatus.UploadingScreenshots;
+                queueItem.StatusMessage = "Uploading screenshots...";
+                TestRunStatus = "Uploading screenshots...";
+                AddLogEntry($"☁️ Uploading screenshots to ImgBB...", ActivityLogLevel.Info);
+
+                var screenshotUrls = await _screenshotService.UploadScreenshotsAsync(screenshotPaths);
+                queueItem.ScreenshotUrls = screenshotUrls;
+                AddLogEntry($"✅ Uploaded {screenshotUrls.Count} screenshots", ActivityLogLevel.Success);
+                TestRunProgress = 85;
+
+                // ==================== STAGE 7: Generate Description ====================
+                queueItem.Status = QueueItemStatus.GeneratingDescription;
+                queueItem.StatusMessage = "Generating description...";
+                TestRunStatus = "Generating description...";
+                AddLogEntry($"📝 Generating Nyaa description...", ActivityLogLevel.Info);
+
+                // Load description template - try multiple locations
+                var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "NyaaDescriptionTemplate.txt");
+                var altTemplatePath = Path.Combine(settings.Folders.EncodingFolder, "NyaaDescriptionTemplate.txt");
+                
+                string template = "";
+                if (File.Exists(templatePath))
+                {
+                    template = await File.ReadAllTextAsync(templatePath, ct);
+                    AddLogEntry($"Loaded template from: {templatePath}", ActivityLogLevel.Info);
+                }
+                else if (File.Exists(altTemplatePath))
+                {
+                    template = await File.ReadAllTextAsync(altTemplatePath, ct);
+                    AddLogEntry($"Loaded template from: {altTemplatePath}", ActivityLogLevel.Info);
+                }
+                else
+                {
+                    // Use default template
+                    AddLogEntry($"⚠️ Template not found, using default", ActivityLogLevel.Warning);
+                    template = @"**Title**: @@TITLE@@
+HEVC 10bit SoftSubbed - 1920 x 1080
+Encoded by: Judas Team
+**Source**: @@SOURCE@@
+
+**Audio**: @@AUDIO_TRACKS@@
+**Subtitles**: @@SUBS_TRACKS@@
+
+[Request an anime or get DDL links @ Discord](@@DISCORD_LINK@@)
+
+**[If you like this release please seed]**
+
+@@SCREENSHOTS@@";
+                }
+                
+                // Build source info - try to extract from source filename if SourceGroup is empty
+                var sourceGroup = queueItem.SourceGroup;
+                if (string.IsNullOrEmpty(sourceGroup))
+                {
+                    // Try to extract group from source filename [Group] format
+                    var sourceGroupMatch = System.Text.RegularExpressions.Regex.Match(queueItem.SourceFileName, @"\[([^\]]+)\]");
+                    if (sourceGroupMatch.Success)
+                    {
+                        sourceGroup = sourceGroupMatch.Groups[1].Value;
+                    }
+                    else
+                    {
+                        sourceGroup = "Unknown";
+                    }
+                }
+                var sourceInfo = $"{sourceGroup} ({queueItem.SourceFileSizeFormatted})";
+                AddLogEntry($"Source info: {sourceInfo}", ActivityLogLevel.Info);
+                
+                var description = _nyaaService!.GenerateDescription(queueItem, template, sourceInfo);
+                
+                if (string.IsNullOrWhiteSpace(description))
+                {
+                    AddLogEntry($"⚠️ Generated description is empty!", ActivityLogLevel.Warning);
+                }
+                else
+                {
+                    AddLogEntry($"Description length: {description.Length} chars", ActivityLogLevel.Info);
+                }
+                
+                var descPath = Path.Combine(settings.Folders.TempFolder, $"{queueItem.OutputFileName}_description.txt");
+                await File.WriteAllTextAsync(descPath, description, ct);
+                queueItem.DescriptionFilePath = descPath;
+                AddLogEntry($"✅ Description generated and saved", ActivityLogLevel.Success);
+                TestRunProgress = 88;
+
+                // ==================== STAGE 8: Create Torrent ====================
+                queueItem.Status = QueueItemStatus.CreatingTorrent;
+                queueItem.StatusMessage = "Creating torrent file...";
+                TestRunStatus = "Creating torrent...";
+                AddLogEntry($"🧲 Creating torrent file...", ActivityLogLevel.Info);
+
+                var torrentPath = Path.Combine(settings.Folders.TempFolder, $"{queueItem.OutputFileName}.torrent");
+                var torrentResult = await _torrentService!.CreateTorrentAsync(queueItem.MuxedFilePath, torrentPath, $"Encoded by Judas - {settings.Discord.ServerInviteLink}");
+                
+                if (!torrentResult.Success)
+                {
+                    throw new Exception($"Torrent creation failed: {torrentResult.ErrorMessage}");
+                }
+
+                queueItem.TorrentFilePath = torrentPath;
+                queueItem.TorrentHash = torrentResult.InfoHash;
+                AddLogEntry($"✅ Torrent created: {torrentResult.InfoHash}", ActivityLogLevel.Success);
+                TestRunProgress = 92;
+
+                // ==================== STAGE 9: Upload to Server ====================
+                queueItem.Status = QueueItemStatus.UploadingEpisode;
+                queueItem.StatusMessage = "Uploading to seedbox...";
+                TestRunStatus = "Uploading to seedbox...";
+                AddLogEntry($"📤 Uploading to seedbox...", ActivityLogLevel.Info);
+
+                var showFolder = show.Model.OutputTorrentTitle ?? show.DisplayName;
+                var uploadResult = await _ftpService!.UploadEpisodeAsync(queueItem.MuxedFilePath, showFolder, Path.GetFileName(queueItem.MuxedFilePath), ct);
+                if (!uploadResult.Success)
+                {
+                    throw new Exception($"Failed to upload file to seedbox: {uploadResult.ErrorMessage}");
+                }
+
+                // Upload torrent file
+                var torrentUploadResult = await _ftpService.UploadTorrentFileAsync(queueItem.TorrentFilePath, Path.GetFileName(queueItem.TorrentFilePath), ct);
+                if (!torrentUploadResult.Success)
+                {
+                    AddLogEntry($"⚠️ Failed to upload torrent file: {torrentUploadResult.ErrorMessage}", ActivityLogLevel.Warning);
+                }
+                AddLogEntry($"✅ Uploaded to seedbox", ActivityLogLevel.Success);
+                TestRunProgress = 97;
+
+                // ==================== STAGE 10: Post to Nyaa ====================
+                queueItem.Status = QueueItemStatus.PostingToNyaa;
+                var visibilityText = IsHiddenPost ? "HIDDEN" : "PUBLIC";
+                queueItem.StatusMessage = $"Posting to Nyaa ({visibilityText})...";
+                TestRunStatus = $"Posting to Nyaa ({visibilityText})...";
+                AddLogEntry($"📢 Posting to Nyaa as {visibilityText}...", ActivityLogLevel.Info);
+
+                var nyaaResult = await _nyaaService.PostToNyaaAsync(queueItem, queueItem.TorrentFilePath, description, isHidden: IsHiddenPost);
+                
+                if (!nyaaResult.Success)
+                {
+                    AddLogEntry($"⚠️ Nyaa posting failed: {nyaaResult.Message} (continuing anyway)", ActivityLogLevel.Warning);
+                }
+                else
+                {
+                    queueItem.NyaaUrl = nyaaResult.Url;
+                    AddLogEntry($"✅ Posted to Nyaa ({visibilityText}): {nyaaResult.Url}", ActivityLogLevel.Success);
+                    
+                    // Send Discord notification - Torrent posted
+                    await _discordService?.SendNyaaPostedAsync(queueItem, nyaaResult.Url, IsHiddenPost)!;
+                }
+                TestRunProgress = 100;
+
+                // ==================== COMPLETE ====================
+                queueItem.Status = QueueItemStatus.Completed;
+                var encodeTypeDesc = IsQuickEncode ? "Quick test" : "Full encode";
+                queueItem.StatusMessage = $"{encodeTypeDesc} completed! ({visibilityText})";
+                queueItem.CompletedAt = DateTime.Now;
+
+                var totalDuration = queueItem.CompletedAt.Value - queueItem.StartedAt!.Value;
+                TestRunStatus = $"✅ {encodeTypeDesc} completed in {totalDuration.TotalMinutes:F1} minutes";
+                AddLogEntry($"✅ {encodeTypeDesc.ToUpper()} COMPLETED in {totalDuration.TotalMinutes:F1} minutes ({visibilityText})", ActivityLogLevel.Success);
+            }
+            catch (Exception ex)
+            {
+                queueItem.Status = QueueItemStatus.Error;
+                queueItem.StatusMessage = ex.Message;
+                queueItem.LastError = ex.ToString();
+                throw;
+            }
+            finally
+            {
+                UpdateQueueSummary();
+            }
+        }
+
+        // ==================== ACTIVITY LOG ====================
+
+        private void AddLogEntry(string message, ActivityLogLevel level)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                ActivityLog.Insert(0, new ActivityLogEntry
+                {
+                    Timestamp = DateTime.Now,
+                    Message = message,
+                    Level = level
+                });
+
+                // Keep only last 200 entries
+                while (ActivityLog.Count > 200)
+                {
+                    ActivityLog.RemoveAt(ActivityLog.Count - 1);
+                }
+            });
+        }
+
+        private void ClearActivityLog()
+        {
+            ActivityLog.Clear();
+            AddLogEntry("Activity log cleared", ActivityLogLevel.Info);
+        }
+
+        // ==================== COMMAND NOTIFICATION ====================
+
+        private void NotifyCommandsChanged()
+        {
+            ((RelayCommand)StartMonitoringCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)StopMonitoringCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)PauseQueueCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)ResumeQueueCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)CancelCurrentProcessCommand).NotifyCanExecuteChanged();
+            ((AsyncRelayCommand)StartTestRunCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)CancelTestRunCommand).NotifyCanExecuteChanged();
+        }
+    }
+}

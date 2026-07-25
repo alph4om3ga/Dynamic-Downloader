@@ -1,0 +1,1698 @@
+<Window x:Class="JudasEncodingManager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:JudasEncodingManager.ViewModels"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Judas Encoding Manager" 
+        Height="800" Width="1200"
+        MinHeight="600" MinWidth="900"
+        Background="{StaticResource BackgroundBrush}"
+        WindowStartupLocation="CenterScreen">
+    
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <Window.InputBindings>
+        <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
+        <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveFileCommand}"/>
+        <KeyBinding Key="N" Modifiers="Ctrl" Command="{Binding NewFileCommand}"/>
+    </Window.InputBindings>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header / Menu Bar -->
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBrush}" Padding="16,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Logo/Title -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="⚡" FontSize="24" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="Judas Encoding Manager" 
+                               FontSize="18" FontWeight="Bold" 
+                               Foreground="{StaticResource TextBrush}"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Test Mode Toggle -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <Border Background="{Binding IsTestMode, Converter={StaticResource TestModeColorConverter}}"
+                            CornerRadius="4" Padding="12,6" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🧪" Margin="0,0,6,0"/>
+                            <TextBlock Text="TEST MODE" FontWeight="SemiBold" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <CheckBox Content="Enable Test Mode" 
+                              IsChecked="{Binding IsTestMode}" 
+                              Style="{StaticResource ModernCheckBox}"
+                              VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- File Buttons -->
+                <StackPanel Grid.Column="3" Orientation="Horizontal">
+                    <Button Content="📁 Open" Command="{Binding OpenFileCommand}" 
+                            Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"/>
+                    <Button Content="💾 Save" Command="{Binding SaveFileCommand}" 
+                            Style="{StaticResource ModernButton}" Margin="0,0,8,0"/>
+                    <Button Content="📄 Save As" Command="{Binding SaveFileAsCommand}" 
+                            Style="{StaticResource SecondaryButton}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- AniDL Update Notification Banner (shown only when an update is available) -->
+        <Border Grid.Row="1"
+                Padding="16,8"
+                Background="#1E3A1E"
+                Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="📦 " FontSize="14" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding AniDLUpdateStatus}"
+                           Foreground="#90EE90"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="2"
+                        Content="⬇ Apply Update"
+                        Command="{Binding ApplyAniDLUpdateCommand}"
+                        Style="{StaticResource ModernButton}"
+                        Margin="16,0,8,0"/>
+                <Button Grid.Column="3"
+                        Content="Later"
+                        Command="{Binding CheckAniDLUpdateCommand}"
+                        Style="{StaticResource SecondaryButton}"/>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <TabControl Grid.Row="2" 
+                    Style="{StaticResource ModernTabControl}"
+                    SelectedIndex="{Binding SelectedTabIndex}"
+                    Margin="16">
+            
+            <!-- Shows Tab -->
+            <TabItem Header="📺 Weekly Shows" Style="{StaticResource ModernTabItem}">
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="300"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Show List -->
+                    <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,16,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Text="Shows" Style="{StaticResource SectionHeader}"/>
+
+                            <ListBox Grid.Row="1" 
+                                     ItemsSource="{Binding SortedShows}"
+                                     SelectedItem="{Binding SelectedShow}"
+                                     Style="{StaticResource ModernListBox}"
+                                     ItemContainerStyle="{StaticResource ModernListBoxItem}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" 
+                                                    Background="{StaticResource SurfaceBrush}"
+                                                    CornerRadius="4" Padding="6,4" 
+                                                    VerticalAlignment="Center"
+                                                    Margin="0,0,8,0"
+                                                    MinWidth="36">
+                                                <TextBlock Text="{Binding ShortReleaseDay}" 
+                                                           FontSize="10" FontWeight="SemiBold"
+                                                           HorizontalAlignment="Center"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11">
+                                                    <Run Text="{Binding ReleaseTime, Mode=OneWay}"/> - <Run Text="{Binding ProgressText, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <Border Grid.Column="2" 
+                                                    Background="{Binding IsActive, Converter={StaticResource BoolToColorConverter}}"
+                                                    CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding IsActive, Converter={StaticResource BoolToStatusConverter}}" 
+                                                           FontSize="10"/>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="➕ Add" Command="{Binding AddShowCommand}" 
+                                        Style="{StaticResource ModernButton}" Margin="0,0,8,0"/>
+                                <Button Content="📋 Copy" Command="{Binding DuplicateShowCommand}" 
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"/>
+                                <Button Content="🗑️" Command="{Binding RemoveShowCommand}" 
+                                        Style="{StaticResource DangerButton}" Margin="0,0,8,0"
+                                        ToolTip="Remove Show"/>
+                                <Button Content="🔄" Command="{Binding RefreshSortCommand}" 
+                                        Style="{StaticResource SecondaryButton}"
+                                        ToolTip="Sort by Day/Time"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Show Details -->
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel DataContext="{Binding SelectedShow}" 
+                                    IsEnabled="{Binding DataContext.SelectedShow, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource NullToBoolConverter}}">
+                            
+                            <!-- Basic Info -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Basic Information" Style="{StaticResource SectionHeader}"/>
+                                    
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,8,12">
+                                            <TextBlock Text="Torrent Title (Full Name)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding OutputTorrentTitle, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Margin="8,0,0,12">
+                                            <TextBlock Text="File Title (Short Name)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding OutputFileTitle, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,8,12">
+                                            <TextBlock Text="Season Number" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding SeasonNumber, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,12">
+                                            <TextBlock Text="INI Script Name" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding IniScriptName, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,8,0">
+                                            <TextBlock Text="Source Group" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding SourceGroup, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Grid.Column="1" Margin="8,0,0,0">
+                                            <TextBlock Text="Episode Offset" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding NumberOfEpisodesToRemoveFromCount, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- RSS Feed -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="RSS Feed" Style="{StaticResource SectionHeader}"/>
+                                    <TextBlock Text="RSS Feed URL" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding RssFeed, UpdateSourceTrigger=PropertyChanged}" 
+                                             Style="{StaticResource ModernTextBox}"/>
+                                    
+                                    <TextBlock Text="Custom Episode Regex (Optional)" Style="{StaticResource FieldLabel}" Margin="0,12,0,4"/>
+                                    <TextBox Text="{Binding CustomEpisodeRegex, UpdateSourceTrigger=PropertyChanged}" 
+                                             Style="{StaticResource ModernTextBox}"/>
+                                    <TextBlock Text="Use this to extract episode numbers from non-standard file names" 
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Schedule -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Release Schedule" Style="{StaticResource SectionHeader}"/>
+                                    
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                            <TextBlock Text="Release Day" Style="{StaticResource FieldLabel}"/>
+                                            <ComboBox SelectedIndex="{Binding ReleaseDayIndex}" 
+                                                      Style="{StaticResource ModernComboBox}"
+                                                      ItemContainerStyle="{StaticResource ModernComboBoxItem}">
+                                                <ComboBoxItem Content="Not Set"/>
+                                                <ComboBoxItem Content="Sunday"/>
+                                                <ComboBoxItem Content="Monday"/>
+                                                <ComboBoxItem Content="Tuesday"/>
+                                                <ComboBoxItem Content="Wednesday"/>
+                                                <ComboBoxItem Content="Thursday"/>
+                                                <ComboBoxItem Content="Friday"/>
+                                                <ComboBoxItem Content="Saturday"/>
+                                            </ComboBox>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Margin="8,0,8,0">
+                                            <TextBlock Text="Release Time" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding ReleaseTime, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                                            <TextBlock Text="Expected Episodes" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox Text="{Binding ExpectedEpisodes, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Status -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Status &amp; Options" Style="{StaticResource SectionHeader}"/>
+                                    
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0">
+                                            <CheckBox Content="Active (Monitor for new episodes)" 
+                                                      IsChecked="{Binding IsActive}" 
+                                                      Style="{StaticResource ModernCheckBox}" 
+                                                      Margin="0,0,0,8"/>
+                                            <CheckBox Content="Auto-post to trackers" 
+                                                      IsChecked="{Binding AutopostOnTrackers}" 
+                                                      Style="{StaticResource ModernCheckBox}"
+                                                      Margin="0,0,0,8"/>
+                                            <CheckBox Content="Uncensored Release" 
+                                                      IsChecked="{Binding IsUncensored}" 
+                                                      Style="{StaticResource ModernCheckBox}"
+                                                      ToolTip="Adds [Uncensored] tag to torrent name"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                            <TextBlock Text="Progress" Style="{StaticResource FieldLabel}"/>
+                                            <TextBlock Text="{Binding ProgressText}" 
+                                                       FontSize="24" FontWeight="Bold" 
+                                                       Foreground="{StaticResource PrimaryBrush}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Manual Episode Management -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Episode Management" Style="{StaticResource SectionHeader}"/>
+                                    
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="100"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="Episode #:" 
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"
+                                                   Foreground="{StaticResource TextBrush}"/>
+                                        <TextBox Grid.Column="1" 
+                                                 Text="{Binding DataContext.ManualEpisodeNumber, RelativeSource={RelativeSource AncestorType=Window}, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                        <Button Grid.Column="2" Content="➕ Add Episode" 
+                                                Command="{Binding DataContext.AddManualEpisodeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Style="{StaticResource ModernButton}" 
+                                                Margin="8,0,0,0"/>
+                                        <Button Grid.Column="3" Content="➖ Remove Last" 
+                                                Command="{Binding DataContext.RemoveLastEpisodeCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Style="{StaticResource SecondaryButton}" 
+                                                Margin="8,0,0,0"/>
+                                        <Button Grid.Column="5" Content="🗑️ Clear All History" 
+                                                Command="{Binding DataContext.ClearEpisodeHistoryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                Style="{StaticResource DangerButton}"/>
+                                    </Grid>
+
+                                    <TextBlock Text="Latest Released Episodes:" 
+                                               Style="{StaticResource FieldLabel}" 
+                                               Margin="0,16,0,4"/>
+                                    <ItemsControl ItemsSource="{Binding EpisodesReleased}" MaxHeight="100">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,2">
+                                                    <Run Text="Episode"/>
+                                                    <Run Text="{Binding EpisodeNumber, Mode=OneWay}"/>
+                                                    <Run Text="{Binding Version, Mode=OneWay, StringFormat=' (v{0})'}"/>
+                                                    <Run Text=" - "/>
+                                                    <Run Text="{Binding ReleaseDate, Mode=OneWay, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"/>
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- RSS Feed Test -->
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="RSS Feed Test" Style="{StaticResource SectionHeader}"/>
+                                    
+                                    <TextBlock Text="Current RSS Feed:" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox Text="{Binding RssFeed, Mode=OneWay}" 
+                                             Style="{StaticResource ModernTextBox}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             Margin="0,0,0,12"/>
+
+                                    <Button Content="🔍 Test RSS Feed" 
+                                            Command="{Binding DataContext.TestRssFeedCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Style="{StaticResource ModernButton}" 
+                                            HorizontalAlignment="Left"
+                                            IsEnabled="{Binding DataContext.IsTestingRss, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource InverseBoolConverter}}"/>
+
+                                    <Border Background="{StaticResource SurfaceBrush}" 
+                                            CornerRadius="4" 
+                                            Padding="12" 
+                                            Margin="0,12,0,0"
+                                            Visibility="{Binding DataContext.RssTestResult, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource StringToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding DataContext.RssTestResult, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   TextWrapping="Wrap"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <!-- General Settings Tab -->
+            <TabItem Header="⚙️ General" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,16,0,0">
+                    <StackPanel MaxWidth="800">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Machine Settings" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock Text="Machine Name" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding MachineName, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Color Scheme -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="🎨 Appearance" Style="{StaticResource SectionHeader}"/>
+                                
+                                <TextBlock Text="Color Scheme" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox ItemsSource="{Binding ColorSchemes}"
+                                          SelectedItem="{Binding SelectedColorScheme}"
+                                          DisplayMemberPath="Name"
+                                          Style="{StaticResource ModernComboBox}"
+                                          ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                                          Margin="0,0,0,12"/>
+
+                                <!-- Color Preview -->
+                                <TextBlock Text="Preview" Style="{StaticResource FieldLabel}"/>
+                                <Border Background="{Binding PreviewBackgroundBrush}" 
+                                        CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                            <Border Background="{Binding PreviewPrimaryBrush}" 
+                                                    CornerRadius="4" Padding="12,6" Margin="0,0,8,0">
+                                                <TextBlock Text="Primary" Foreground="White" FontWeight="SemiBold"/>
+                                            </Border>
+                                            <Border Background="{Binding PreviewAccentBrush}" 
+                                                    CornerRadius="4" Padding="12,6" Margin="0,0,8,0">
+                                                <TextBlock Text="Accent" Foreground="White" FontWeight="SemiBold"/>
+                                            </Border>
+                                            <Border Background="{Binding PreviewCardBrush}" 
+                                                    CornerRadius="4" Padding="12,6">
+                                                <TextBlock Text="Card" Foreground="White" FontWeight="SemiBold"/>
+                                            </Border>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Background="{Binding PreviewSuccessBrush}" 
+                                                    CornerRadius="4" Padding="8,4" Margin="0,0,4,0">
+                                                <TextBlock Text="Success" Foreground="White" FontSize="11"/>
+                                            </Border>
+                                            <Border Background="{Binding PreviewWarningBrush}" 
+                                                    CornerRadius="4" Padding="8,4" Margin="0,0,4,0">
+                                                <TextBlock Text="Warning" Foreground="White" FontSize="11"/>
+                                            </Border>
+                                            <Border Background="{Binding PreviewErrorBrush}" 
+                                                    CornerRadius="4" Padding="8,4">
+                                                <TextBlock Text="Error" Foreground="White" FontSize="11"/>
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button Content="🎨 Apply Color Scheme" 
+                                        Command="{Binding ApplyColorSchemeCommand}"
+                                        Style="{StaticResource ModernButton}"
+                                        HorizontalAlignment="Left"/>
+                                <TextBlock Text="Changes will apply immediately and be saved with settings" 
+                                           Foreground="{StaticResource TextSecondaryBrush}" 
+                                           FontSize="11" Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Image Hosting API Keys" Style="{StaticResource SectionHeader}"/>
+                                
+                                <TextBlock Text="ImgBB API Key" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding ImgbbApiKey, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="FreeImage API Key" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding FreeimageApiKey, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Tool Paths" Style="{StaticResource SectionHeader}"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="mkvmerge Path" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding MkvmergePath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="0" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseMkvmergeCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom" Margin="0,0,0,12"/>
+
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="FFmpeg Path" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FfmpegPath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="1" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseFfmpegCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- aniDL Configuration -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="📥 aniDL (Direct Download)" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock Text="multi-downloader-nx CLI for Crunchyroll, HIDIVE, and AnimationDigitalNetwork direct downloads."
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <!-- Path row -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="aniDL Folder" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding AniDLPath, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Browse"
+                                            Command="{Binding BrowseAniDLPathCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            VerticalAlignment="Bottom"/>
+                                </Grid>
+
+                                <!-- Installed version + update status -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                                        <TextBlock Text="Installed: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                        <TextBlock Text="{Binding AniDLInstalledVersion}" FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding AniDLUpdateStatus}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <Button Content="🔍 Check for Update"
+                                                Command="{Binding CheckAniDLUpdateCommand}"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Margin="0,0,8,0"/>
+                                        <Button Content="⬇ Apply Update"
+                                                Command="{Binding ApplyAniDLUpdateCommand}"
+                                                Style="{StaticResource ModernButton}"
+                                                Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Update progress bar (visible only during download) -->
+                                <ProgressBar Value="{Binding AniDLUpdateProgress}"
+                                             Minimum="0" Maximum="1" Height="4"
+                                             Margin="0,0,0,8"
+                                             Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                                <!-- Options -->
+                                <CheckBox Content="Check for aniDL updates on startup"
+                                          IsChecked="{Binding AniDLCheckUpdatesOnStartup}"
+                                          Style="{StaticResource ModernCheckBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Folders Configuration -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="📁 Folder Paths" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock Text="Configure where encoding files are stored. Temp folder contains intermediate files (.hevc video, audio/subs, CSV data, logs)."
+                                           Foreground="{StaticResource TextSecondaryBrush}" 
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Base Path -->
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Base Path (Root folder for all operations)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding BasePath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="0" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseBasePathCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom" Margin="0,0,0,12"/>
+
+                                    <!-- Temp Folder -->
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Style="{StaticResource FieldLabel}">
+                                            <Run Text="Temp Folder"/>
+                                            <Run Text="(video/, audio-subs/, data/, done/)" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        </TextBlock>
+                                        <TextBox Text="{Binding TempFolder, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,12">
+                                        <Button Content="Browse" 
+                                                Command="{Binding BrowseTempFolderCommand}"
+                                                Style="{StaticResource SecondaryButton}" 
+                                                Margin="0,0,4,0"/>
+                                        <Button Content="📂" 
+                                                Command="{Binding OpenTempFolderCommand}"
+                                                Style="{StaticResource SecondaryButton}" 
+                                                ToolTip="Open in Explorer"
+                                                Padding="8,10"/>
+                                    </StackPanel>
+
+                                    <!-- Logs Folder -->
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Logs Folder (Encoding session logs)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding LogsFolder, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,12">
+                                        <Button Content="Browse" 
+                                                Command="{Binding BrowseLogsFolderCommand}"
+                                                Style="{StaticResource SecondaryButton}" 
+                                                Margin="0,0,4,0"/>
+                                        <Button Content="📂" 
+                                                Command="{Binding OpenLogsFolderCommand}"
+                                                Style="{StaticResource SecondaryButton}" 
+                                                ToolTip="Open in Explorer"
+                                                Padding="8,10"/>
+                                    </StackPanel>
+
+                                    <!-- Encoding Folder -->
+                                    <StackPanel Grid.Row="3" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Encoding Folder (Source files for encoding)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EncodingFolder, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="3" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseEncodingFolderCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom" Margin="0,0,0,12"/>
+
+                                    <!-- Screenshots Folder -->
+                                    <StackPanel Grid.Row="4" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Screenshots Folder (Captured screenshots)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding ScreenshotsFolder, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="4" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseScreenshotsFolderCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom" Margin="0,0,0,12"/>
+
+                                    <!-- Seeding Folder -->
+                                    <StackPanel Grid.Row="5" Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="Seeding Folder (Final releases for seeding)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding SeedingFolder, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Row="5" Grid.Column="1" Content="Browse" 
+                                            Command="{Binding BrowseSeedingFolderCommand}"
+                                            Style="{StaticResource SecondaryButton}" 
+                                            VerticalAlignment="Bottom"/>
+                                </Grid>
+
+                                <!-- Temp Folder Options -->
+                                <Border Background="{StaticResource SurfaceBrush}" 
+                                        CornerRadius="4" Padding="12" Margin="0,16,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <CheckBox Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"
+                                                  Content="Auto-clear temp folder after successful encode" 
+                                                  IsChecked="{Binding AutoClearTempOnSuccess}" 
+                                                  Style="{StaticResource ModernCheckBox}"
+                                                  Margin="0,0,0,8"/>
+
+                                        <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Margin="0,0,0,12">
+                                            <TextBlock Text="Keep logs for" 
+                                                       Foreground="{StaticResource TextBrush}" 
+                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBox Text="{Binding KeepLogsDays, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}" 
+                                                     Width="50"/>
+                                            <TextBlock Text="days" 
+                                                       Foreground="{StaticResource TextBrush}" 
+                                                       VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                            <Button Content="🗑️ Clear Temp Folder Now" 
+                                                    Command="{Binding ClearTempFolderCommand}"
+                                                    Style="{StaticResource DangerButton}" 
+                                                    Margin="0,0,8,0"/>
+                                            <Button Content="🧹 Clean Old Logs" 
+                                                    Command="{Binding CleanOldLogsCommand}"
+                                                    Style="{StaticResource SecondaryButton}" 
+                                                    Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding TempFolderSize}" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       VerticalAlignment="Center" FontSize="11"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Temp Folder Structure Info -->
+                                <TextBlock Margin="0,12,0,0" Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextWrapping="Wrap">
+                                    <Run FontWeight="SemiBold">Temp folder structure:</Run><LineBreak/>
+                                    <Run>• video/ - Encoded .hevc/.h265 video files</Run><LineBreak/>
+                                    <Run>• audio-subs/ - Extracted audio and subtitle tracks</Run><LineBreak/>
+                                    <Run>• data/ - CSV encode statistics</Run><LineBreak/>
+                                    <Run>• done/ - Processed source files (moved after encode)</Run>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Connections Tab -->
+            <TabItem Header="🔗 Connections" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,16,0,0">
+                    <StackPanel MaxWidth="800">
+                        <!-- qBittorrent -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="qBittorrent WebUI" Style="{StaticResource SectionHeader}"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Local IP:Port" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding QBitLocalIpPort, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,12">
+                                        <TextBlock Text="Seedbox IP:Port" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding QBitSeedboxIpPort, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="Username" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding QBitSeedboxUsername, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="8,0,8,0">
+                                        <TextBlock Text="Password" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding QBitSeedboxPassword, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                                        <TextBlock Text="Releases Path" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding QBitSeedboxReleasesPath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- FTP -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="FTP Server" Style="{StaticResource SectionHeader}"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Host" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FtpHost, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="8,0,8,12">
+                                        <TextBlock Text="Username" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FtpUsername, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2" Margin="8,0,0,12">
+                                        <TextBlock Text="Password" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FtpPassword, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="Releases Path" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FtpReleasesPath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                        <TextBlock Text="Torrents Path" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding FtpTorrentsPath, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Discord -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Discord" Style="{StaticResource SectionHeader}"/>
+                                
+                                <TextBlock Text="Webhook URL" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding DiscordWebhookUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Server Invite Link" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding DiscordServerInviteLink, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Bot Token (Optional)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding DiscordBotToken, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Telegram -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Telegram (Optional)" Style="{StaticResource SectionHeader}"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="Bot Token" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding TelegramBotToken, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                        <TextBlock Text="Chat ID" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding TelegramChatId, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Auto Posting Tab -->
+            <TabItem Header="📤 Auto Posting" Style="{StaticResource ModernTabItem}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,16,0,0">
+                    <StackPanel MaxWidth="900">
+                        <!-- Quick Setup - Nyaa -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Nyaa.si (Primary)" Style="{StaticResource SectionHeader}"/>
+                                    <Border Grid.Column="1" 
+                                            Background="{StaticResource SuccessBrush}"
+                                            CornerRadius="4" Padding="8,4" VerticalAlignment="Top">
+                                        <TextBlock Text="Default" FontSize="11" Foreground="White"/>
+                                    </Border>
+                                </Grid>
+                                
+                                <TextBlock Text="Cookie: __ddlg" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding NyaaCookieDdlg, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="Cookie: session" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding NyaaCookieSession, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" 
+                                         TextWrapping="Wrap" 
+                                         AcceptsReturn="True"
+                                         Height="60" Margin="0,0,0,12"/>
+
+                                <TextBlock Text="How to get cookies: Open nyaa.si → Login → Press F12 → Application tab → Cookies → Copy __ddlg and session values" 
+                                           Foreground="{StaticResource TextSecondaryBrush}" 
+                                           FontSize="11" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Quick Setup - AniDex -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="AniDex" Style="{StaticResource SectionHeader}"/>
+                                    <CheckBox Grid.Column="1" 
+                                              Content="Enabled"
+                                              IsChecked="{Binding IsAnidexEnabled}"
+                                              Style="{StaticResource ModernCheckBox}"
+                                              VerticalAlignment="Top"/>
+                                </Grid>
+                                
+                                <TextBlock Text="API Key" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding AnidexApi, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Additional Trackers -->
+                        <Border Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Additional Trackers &amp; Websites" Style="{StaticResource SectionHeader}"/>
+                                    <Button Grid.Column="1" Content="➕ Add Tracker" 
+                                            Command="{Binding AddTrackerCommand}"
+                                            Style="{StaticResource ModernButton}"
+                                            VerticalAlignment="Top"/>
+                                </Grid>
+
+                                <TextBlock Grid.Row="1" 
+                                           Text="Configure additional trackers for cross-posting releases. Each tracker can be enabled/disabled per release."
+                                           Foreground="{StaticResource TextSecondaryBrush}" 
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <!-- Tracker List -->
+                                <ListBox Grid.Row="2" 
+                                         ItemsSource="{Binding Trackers}"
+                                         SelectedItem="{Binding SelectedTracker}"
+                                         Style="{StaticResource ModernListBox}"
+                                         ItemContainerStyle="{StaticResource ModernListBoxItem}"
+                                         MinHeight="150"
+                                         MaxHeight="300">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <CheckBox Grid.Column="0" 
+                                                          IsChecked="{Binding Enabled}" 
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,12,0"/>
+
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11">
+                                                        <Run Text="{Binding Type}"/> - <Run Text="{Binding EndpointUrl}"/>
+                                                    </TextBlock>
+                                                </StackPanel>
+
+                                                <Border Grid.Column="2" 
+                                                        Background="{Binding Enabled, Converter={StaticResource BoolToColorConverter}}"
+                                                        CornerRadius="4" Padding="6,2" 
+                                                        VerticalAlignment="Center" Margin="8,0">
+                                                    <TextBlock Text="{Binding Enabled, Converter={StaticResource BoolToStatusConverter}}" 
+                                                               FontSize="10"/>
+                                                </Border>
+
+                                                <Button Grid.Column="3" Content="✏️" 
+                                                        Command="{Binding DataContext.EditTrackerCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Style="{StaticResource SecondaryButton}"
+                                                        Padding="8,4"
+                                                        ToolTip="Edit Tracker"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <!-- Tracker Actions -->
+                                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Content="🗑️ Remove Selected" 
+                                            Command="{Binding RemoveTrackerCommand}"
+                                            Style="{StaticResource DangerButton}" Margin="0,0,8,0"/>
+                                    <Button Content="📋 Duplicate" 
+                                            Command="{Binding DuplicateTrackerCommand}"
+                                            Style="{StaticResource SecondaryButton}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Tracker Editor (shows when a tracker is selected for editing) -->
+                        <Border Style="{StaticResource Card}" 
+                                Visibility="{Binding IsEditingTracker, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Edit Tracker" Style="{StaticResource SectionHeader}"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Name" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EditingTracker.Name, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Margin="8,0,0,12">
+                                        <TextBlock Text="Type" Style="{StaticResource FieldLabel}"/>
+                                        <ComboBox ItemsSource="{Binding TrackerTypes}"
+                                                  SelectedItem="{Binding EditingTracker.Type}"
+                                                  Style="{StaticResource ModernComboBox}"
+                                                  ItemContainerStyle="{StaticResource ModernComboBoxItem}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,0,12">
+                                        <TextBlock Text="Endpoint URL" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EditingTracker.EndpointUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,8,12">
+                                        <TextBlock Text="Category" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EditingTracker.Category, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Margin="8,0,0,12">
+                                        <TextBlock Text="Notes" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EditingTracker.Notes, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2">
+                                        <TextBlock Text="Credentials (Key=Value, one per line)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding EditingTrackerCredentials, UpdateSourceTrigger=PropertyChanged}" 
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 AcceptsReturn="True"
+                                                 Height="80"
+                                                 TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                    <Button Content="💾 Save Changes" 
+                                            Command="{Binding SaveTrackerCommand}"
+                                            Style="{StaticResource ModernButton}" Margin="0,0,8,0"/>
+                                    <Button Content="Cancel" 
+                                            Command="{Binding CancelEditTrackerCommand}"
+                                            Style="{StaticResource SecondaryButton}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Supported Tracker Types Info -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="ℹ️ Supported Tracker Types" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12">
+                                    <Run FontWeight="SemiBold" Foreground="{StaticResource TextBrush}">Nyaa</Run> - Cookie-based authentication (session + __ddlg)<LineBreak/>
+                                    <Run FontWeight="SemiBold" Foreground="{StaticResource TextBrush}">AniDex</Run> - API key authentication<LineBreak/>
+                                    <Run FontWeight="SemiBold" Foreground="{StaticResource TextBrush}">TokyoTosho</Run> - API-based posting<LineBreak/>
+                                    <Run FontWeight="SemiBold" Foreground="{StaticResource TextBrush}">AnimeTosho</Run> - Automatic scraping (no upload needed)<LineBreak/>
+                                    <Run FontWeight="SemiBold" Foreground="{StaticResource TextBrush}">Custom</Run> - Configure your own endpoint with custom credentials
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- qBittorrent Tab -->
+            <TabItem Header="📥 qBittorrent" Style="{StaticResource ModernTabItem}">
+                <Grid Margin="0,16,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- qBittorrent Selector -->
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <RadioButton Grid.Column="0" 
+                                         Content="🖥️ Local qBittorrent" 
+                                         GroupName="QBitSelector"
+                                         IsChecked="{Binding IsLocalQBitSelected}"
+                                         Style="{StaticResource ModernRadioButton}"
+                                         Margin="0,0,16,0"/>
+                            
+                            <RadioButton Grid.Column="1" 
+                                         Content="🌐 Seedbox qBittorrent" 
+                                         GroupName="QBitSelector"
+                                         IsChecked="{Binding IsSeedboxQBitSelected}"
+                                         Style="{StaticResource ModernRadioButton}"
+                                         Margin="0,0,16,0"/>
+
+                            <Button Grid.Column="2" Content="🔄 Refresh" 
+                                    Command="{Binding RefreshQBitCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Margin="0,0,8,0"/>
+
+                            <TextBlock Grid.Column="3" 
+                                       Text="{Binding CurrentQBitUrl}" 
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
+
+                            <Border Grid.Column="4" 
+                                    Background="{Binding QBitConnectionStatus, Converter={StaticResource ConnectionStatusColorConverter}}"
+                                    CornerRadius="4" Padding="8,4" Margin="8,0,0,0">
+                                <TextBlock Text="{Binding QBitConnectionStatus}" FontSize="11"/>
+                            </Border>
+
+                            <Button Grid.Column="5" Content="⚙️" 
+                                    Command="{Binding OpenQBitSettingsCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    ToolTip="Open Connection Settings"
+                                    Margin="8,0,0,0"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- WebView Container -->
+                    <Border Grid.Row="1" 
+                            Background="{StaticResource SurfaceBrush}" 
+                            CornerRadius="8" 
+                            Margin="0,16,0,0"
+                            Padding="2">
+                        <Grid>
+                            <!-- Local qBittorrent WebView -->
+                            <wv2:WebView2 x:Name="LocalQBitWebView"
+                                          Visibility="{Binding IsLocalQBitSelected, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                            
+                            <!-- Seedbox qBittorrent WebView -->
+                            <wv2:WebView2 x:Name="SeedboxQBitWebView"
+                                          Visibility="{Binding IsSeedboxQBitSelected, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                            <!-- Loading/Error Overlay -->
+                            <Border Background="{StaticResource BackgroundBrush}" 
+                                    Visibility="{Binding IsQBitLoading, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="🔄" FontSize="48" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="Connecting to qBittorrent..." 
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontSize="16" Margin="0,16,0,0"/>
+                                    <TextBlock Text="{Binding CurrentQBitUrl}" 
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- No URL Configured Message -->
+                            <Border Background="{StaticResource BackgroundBrush}" 
+                                    Visibility="{Binding IsQBitUrlEmpty, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="⚠️" FontSize="48" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="qBittorrent URL not configured" 
+                                               Foreground="{StaticResource TextBrush}"
+                                               FontSize="16" Margin="0,16,0,0"/>
+                                    <TextBlock Text="Go to Connections tab to set up qBittorrent WebUI URL" 
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12" Margin="0,8,0,0"/>
+                                    <Button Content="Open Connection Settings" 
+                                            Command="{Binding OpenQBitSettingsCommand}"
+                                            Style="{StaticResource ModernButton}"
+                                            HorizontalAlignment="Center"
+                                            Margin="0,16,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- Automation Tab -->
+            <TabItem Header="🤖 Automation" Style="{StaticResource ModernTabItem}">
+                <Grid Margin="0,16,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="350"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Control Panel -->
+                    <Border Grid.Row="0" Grid.ColumnSpan="2" Style="{StaticResource Card}" Margin="0,0,0,16">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Start/Stop Monitoring -->
+                            <Button Grid.Column="0" Content="▶️ Start Monitoring" 
+                                    Command="{Binding Automation.StartMonitoringCommand}"
+                                    Style="{StaticResource ModernButton}"
+                                    Visibility="{Binding Automation.IsMonitoring, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                                    Margin="0,0,8,0"/>
+                            <Button Grid.Column="0" Content="⏹️ Stop Monitoring" 
+                                    Command="{Binding Automation.StopMonitoringCommand}"
+                                    Style="{StaticResource DangerButton}"
+                                    Visibility="{Binding Automation.IsMonitoring, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Margin="0,0,8,0"/>
+
+                            <!-- Pause/Resume -->
+                            <Button Grid.Column="1" Content="⏸️ Pause" 
+                                    Command="{Binding Automation.PauseQueueCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Visibility="{Binding Automation.IsPaused, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                                    IsEnabled="{Binding Automation.IsMonitoring}"
+                                    Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Content="▶️ Resume" 
+                                    Command="{Binding Automation.ResumeQueueCommand}"
+                                    Style="{StaticResource ModernButton}"
+                                    Visibility="{Binding Automation.IsPaused, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Margin="0,0,8,0"/>
+
+                            <!-- Cancel Current -->
+                            <Button Grid.Column="2" Content="🚫 Cancel Current" 
+                                    Command="{Binding Automation.CancelCurrentProcessCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    IsEnabled="{Binding Automation.IsProcessing}"
+                                    Margin="0,0,8,0"/>
+
+                            <!-- Stop All -->
+                            <Button Grid.Column="3" Content="🛑 STOP ALL" 
+                                    Command="{Binding Automation.StopAllProcessingCommand}"
+                                    Style="{StaticResource DangerButton}"
+                                    ToolTip="Stop monitoring and cancel all in-progress operations"
+                                    Margin="0,0,8,0"/>
+
+                            <!-- Direct Download via aniDL -->
+                            <Button Grid.Column="5" Content="📥 Direct Download"
+                                    Command="{Binding OpenAniDLSearchCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    ToolTip="Search and download episodes directly from streaming services using aniDL"
+                                    Margin="0,0,16,0"/>
+
+                            <!-- RSS Interval -->
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <TextBlock Text="RSS Check Interval:" 
+                                           Foreground="{StaticResource TextBrush}" 
+                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Text="{Binding Automation.RssCheckInterval, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Width="50"/>
+                                <TextBlock Text="min" 
+                                           Foreground="{StaticResource TextSecondaryBrush}" 
+                                           VerticalAlignment="Center" Margin="4,0,0,0"/>
+                            </StackPanel>
+
+                            <!-- Status -->
+                            <Border Grid.Column="6" 
+                                    Background="{Binding Automation.MonitoringStatus, Converter={StaticResource MonitoringStatusColorConverter}}"
+                                    CornerRadius="4" Padding="12,6" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Automation.MonitoringStatus}" 
+                                           FontWeight="SemiBold" FontSize="12"/>
+                            </Border>
+
+                            <!-- Queue Summary -->
+                            <TextBlock Grid.Column="7" 
+                                       Text="{Binding Automation.QueueSummary}" 
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" FontSize="11"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Queue Panel -->
+                    <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,8,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Text="Queue" Style="{StaticResource SectionHeader}"/>
+
+                            <ListBox Grid.Row="1" 
+                                     ItemsSource="{Binding Automation.Queue}"
+                                     SelectedItem="{Binding Automation.SelectedQueueItem}"
+                                     Style="{StaticResource ModernListBox}"
+                                     ItemContainerStyle="{StaticResource ModernListBoxItem}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" 
+                                                       Text="{Binding OutputFileName}" 
+                                                       FontWeight="SemiBold"/>
+                                            
+                                            <Border Grid.Row="0" Grid.Column="1" 
+                                                    Background="{Binding Status, Converter={StaticResource QueueStatusColorConverter}}"
+                                                    CornerRadius="4" Padding="6,2" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding Status}" FontSize="10"/>
+                                            </Border>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                       Text="{Binding StatusMessage}" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       FontSize="11" TextTrimming="CharacterEllipsis"/>
+
+                                            <!-- Progress Bar for active items -->
+                                            <ProgressBar Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2"
+                                                         Value="{Binding EncodeProgress}" Maximum="1"
+                                                         Height="4" Margin="0,4,0,0"
+                                                         Visibility="{Binding Status, Converter={StaticResource EncodingStatusToVisibilityConverter}}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="🔄 Retry" 
+                                        Command="{Binding Automation.RetryFailedItemCommand}"
+                                        Style="{StaticResource ModernButton}" Margin="0,0,8,0"/>
+                                <Button Content="🗑️ Remove" 
+                                        Command="{Binding Automation.RemoveQueueItemCommand}"
+                                        Style="{StaticResource DangerButton}" Margin="0,0,8,0"/>
+                                <Button Content="🧹 Clear Completed" 
+                                        Command="{Binding Automation.ClearCompletedItemsCommand}"
+                                        Style="{StaticResource SecondaryButton}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Right Column: Test Run + Activity Log -->
+                    <Grid Grid.Row="1" Grid.Column="1" Margin="8,0,0,0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Test Run Panel -->
+                        <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Text="🧪 Test Run" Style="{StaticResource SectionHeader}"/>
+
+                                <!-- Show Selection -->
+                                <Grid Grid.Row="1" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding Shows}"
+                                              SelectedItem="{Binding Automation.TestRunSelectedShow}"
+                                              DisplayMemberPath="DisplayName"
+                                              Style="{StaticResource ModernComboBox}"/>
+                                    <Button Grid.Column="1" Content="📥 Load Episodes" 
+                                            Command="{Binding Automation.LoadTestRunRssItemsCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Margin="8,0,0,0"/>
+                                </Grid>
+
+                                <!-- Episode Selection -->
+                                <ComboBox Grid.Row="2" 
+                                          ItemsSource="{Binding Automation.TestRunRssItems}"
+                                          SelectedItem="{Binding Automation.TestRunSelectedEpisode}"
+                                          DisplayMemberPath="Title"
+                                          Style="{StaticResource ModernComboBox}"
+                                          Margin="0,8,0,0"
+                                          IsEnabled="{Binding Automation.TestRunRssItems.Count}"/>
+
+                                <!-- Test Mode Toggle -->
+                                <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}" 
+                                        CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Pipeline Mode" 
+                                                   Foreground="{StaticResource TextBrush}" 
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton Content="Simulate" 
+                                                         IsChecked="{Binding Automation.IsSimulatedTest}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         Margin="0,0,12,0"/>
+                                            <RadioButton Content="Real" 
+                                                         IsChecked="{Binding Automation.IsRealTest}"
+                                                         Foreground="{StaticResource TextBrush}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Encode Type Toggle (only when Real is selected) -->
+                                <Border Grid.Row="4" Background="{StaticResource SurfaceBrush}" 
+                                        CornerRadius="4" Padding="8" Margin="0,4,0,0"
+                                        IsEnabled="{Binding Automation.CanSelectEncodeOptions}"
+                                        Opacity="{Binding Automation.CanSelectEncodeOptions, Converter={StaticResource BoolToOpacityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Encode Type" 
+                                                   Foreground="{StaticResource TextBrush}" 
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton Content="Quick (5 min)" 
+                                                         IsChecked="{Binding Automation.IsQuickEncode}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         Margin="0,0,12,0"
+                                                         GroupName="EncodeType"/>
+                                            <RadioButton Content="Full Episode" 
+                                                         IsChecked="{Binding Automation.IsFullEncode}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         GroupName="EncodeType"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Post Visibility Toggle (only when Real is selected) -->
+                                <Border Grid.Row="5" Background="{StaticResource SurfaceBrush}" 
+                                        CornerRadius="4" Padding="8" Margin="0,4,0,0"
+                                        IsEnabled="{Binding Automation.CanSelectEncodeOptions}"
+                                        Opacity="{Binding Automation.CanSelectEncodeOptions, Converter={StaticResource BoolToOpacityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Nyaa Visibility" 
+                                                   Foreground="{StaticResource TextBrush}" 
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton Content="Hidden" 
+                                                         IsChecked="{Binding Automation.IsHiddenPost}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         Margin="0,0,12,0"
+                                                         GroupName="PostVisibility"/>
+                                            <RadioButton Content="Public" 
+                                                         IsChecked="{Binding Automation.IsPublicPost}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         GroupName="PostVisibility"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- Description -->
+                                <TextBlock Grid.Row="6" 
+                                           Text="{Binding Automation.TestModeDescription}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="10" TextWrapping="Wrap" FontStyle="Italic"
+                                           Margin="0,8,0,0"/>
+
+                                <!-- Status -->
+                                <TextBlock Grid.Row="7" 
+                                           Text="{Binding Automation.TestRunStatus}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="11" TextWrapping="Wrap"
+                                           Margin="0,4,0,0"/>
+
+                                <!-- Start Buttons -->
+                                <Grid Grid.Row="8" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ProgressBar Grid.Column="0" 
+                                                 Value="{Binding Automation.TestRunProgress}" 
+                                                 Maximum="100"
+                                                 Height="6" 
+                                                 Margin="0,0,8,0"
+                                                 Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                    <Button Grid.Column="1" Content="🚀 Start" 
+                                            Command="{Binding Automation.StartTestRunCommand}"
+                                            Style="{StaticResource ModernButton}"
+                                            Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
+                                    <Button Grid.Column="1" Content="🛑 Cancel" 
+                                            Command="{Binding Automation.CancelTestRunCommand}"
+                                            Style="{StaticResource DangerButton}"
+                                            Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Activity Log Panel -->
+                        <Border Grid.Row="1" Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0">
+                                    <TextBlock Text="Activity Log" Style="{StaticResource SectionHeader}"/>
+                                    <Button Content="🧹 Clear" 
+                                            Command="{Binding Automation.ClearActivityLogCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            Padding="8,4"/>
+                                </Grid>
+
+                                <ListBox Grid.Row="1" 
+                                         ItemsSource="{Binding Automation.ActivityLog}"
+                                         Style="{StaticResource ModernListBox}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" 
+                                                           Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}" 
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           FontSize="10" Margin="0,0,8,0"
+                                                           VerticalAlignment="Top"/>
+                                                <TextBlock Grid.Column="1" 
+                                                           Text="{Binding Message}" 
+                                                           Foreground="{Binding Level, Converter={StaticResource LogLevelColorConverter}}"
+                                                           FontSize="11" TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}" Padding="16,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" 
+                           Text="{Binding StatusMessage}" 
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Border Background="{Binding HasUnsavedChanges, Converter={StaticResource UnsavedChangesColorConverter}}"
+                            CornerRadius="4" Padding="8,4" Margin="0,0,8,0"
+                            Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <TextBlock Text="Unsaved Changes" FontSize="11"/>
+                    </Border>
+                    <TextBlock Text="v1.0.0" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
