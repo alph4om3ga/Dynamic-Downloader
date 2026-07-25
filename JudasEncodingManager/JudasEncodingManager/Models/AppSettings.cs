@@ -48,6 +48,9 @@ namespace JudasEncodingManager.Models
 
         [JsonProperty("anidl")]
         public AniDLSettings AniDL { get; set; } = new();
+
+        [JsonProperty("crd")]
+        public CRDSettings CRD { get; set; } = new();
     }
 
     public class QBittorrentSettings
@@ -312,6 +315,28 @@ namespace JudasEncodingManager.Models
         }
     }
 
+    /// <summary>How a show's source episode is obtained.</summary>
+    public enum DownloadMethod
+    {
+        /// <summary>Crunchy-DL (CRD) — downloads directly from Crunchyroll. Primary method.</summary>
+        CRD,
+        /// <summary>Nyaa RSS feed monitored via qBittorrent. Secondary method.</summary>
+        RSS,
+        /// <summary>multi-downloader-nx (aniDL) — streaming service downloader. Backup method.</summary>
+        AniDL
+    }
+
+    public class CRDSettings
+    {
+        /// <summary>Path to the folder containing CRD.exe and Updater.exe.</summary>
+        [JsonProperty("path")]
+        public string Path { get; set; } = @"C:\JudasEncodingManager\CRD";
+
+        /// <summary>When true, the built-in Updater.exe is run on startup.</summary>
+        [JsonProperty("auto_update")]
+        public bool AutoUpdate { get; set; } = false;
+    }
+
     public class AniDLSettings
     {
         /// <summary>
@@ -329,6 +354,37 @@ namespace JudasEncodingManager.Models
 
     public class WeeklyShow
     {
+        [JsonProperty("download_method")]
+        public DownloadMethod DownloadMethod { get; set; } = DownloadMethod.CRD;
+
+        // ── CRD fields ──────────────────────────────────────────────────────
+        /// <summary>Crunchyroll series ID, e.g. "GT00378117".</summary>
+        [JsonProperty("crd_show_id")]
+        public string CrdShowId { get; set; } = "";
+
+        /// <summary>Crunchyroll season ID (populated after loading the show in CRD).</summary>
+        [JsonProperty("crd_season_id")]
+        public string CrdSeasonId { get; set; } = "";
+
+        /// <summary>Human-readable season name for display, e.g. "Season 2".</summary>
+        [JsonProperty("crd_season_name")]
+        public string CrdSeasonName { get; set; } = "";
+
+        /// <summary>
+        /// Folder where CRD saves completed episode files for this show.
+        /// JEM watches this folder on the release schedule.
+        /// </summary>
+        [JsonProperty("crd_output_path")]
+        public string CrdOutputPath { get; set; } = "";
+
+        /// <summary>
+        /// Optional glob/wildcard used to match CRD episode files, e.g. "TowerOfGod*.mkv".
+        /// Defaults to "*.mkv" when empty.
+        /// </summary>
+        [JsonProperty("crd_file_pattern")]
+        public string CrdFilePattern { get; set; } = "";
+
+        // ── Shared ──────────────────────────────────────────────────────────
         [JsonProperty("ini_script_name")]
         public string IniScriptName { get; set; } = "";
 

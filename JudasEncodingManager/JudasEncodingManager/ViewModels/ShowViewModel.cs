@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using JudasEncodingManager.Models;
+using static JudasEncodingManager.Models.DownloadMethod;
 
 namespace JudasEncodingManager.ViewModels
 {
@@ -164,6 +165,83 @@ namespace JudasEncodingManager.ViewModels
             set { _model.IsUncensored = value; OnPropertyChanged(); }
         }
 
+        // ==================== CRD PROPERTIES ====================
+
+        public DownloadMethod DownloadMethod
+        {
+            get => _model.DownloadMethod;
+            set
+            {
+                _model.DownloadMethod = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(UsesCRD));
+                OnPropertyChanged(nameof(UsesRSS));
+                OnPropertyChanged(nameof(UsesAniDL));
+                OnPropertyChanged(nameof(DownloadMethodIndex));
+                OnPropertyChanged(nameof(ShortDownloadMethod));
+                OnPropertyChanged(nameof(DownloadMethodColor));
+            }
+        }
+
+        /// <summary>ComboBox index: 0=CRD, 1=RSS, 2=AniDL</summary>
+        public int DownloadMethodIndex
+        {
+            get => (int)_model.DownloadMethod;
+            set { DownloadMethod = (DownloadMethod)value; }
+        }
+
+        public bool UsesCRD   => DownloadMethod == CRD;
+        public bool UsesRSS   => DownloadMethod == RSS;
+        public bool UsesAniDL => DownloadMethod == AniDL;
+
+        /// <summary>Short badge text shown in the show list, e.g. "CRD", "RSS", "DL".</summary>
+        public string ShortDownloadMethod => DownloadMethod switch
+        {
+            CRD   => "CRD",
+            RSS   => "RSS",
+            AniDL => "DL",
+            _     => "?"
+        };
+
+        /// <summary>Badge background colour for the download method.</summary>
+        public string DownloadMethodColor => DownloadMethod switch
+        {
+            CRD   => "#1a4a2e",   // dark green — primary
+            RSS   => "#1a2a4a",   // dark blue  — secondary
+            AniDL => "#3a2a1a",   // dark amber — backup
+            _     => "#333333"
+        };
+
+        public string CrdShowId
+        {
+            get => _model.CrdShowId;
+            set { _model.CrdShowId = value; OnPropertyChanged(); }
+        }
+
+        public string CrdSeasonId
+        {
+            get => _model.CrdSeasonId;
+            set { _model.CrdSeasonId = value; OnPropertyChanged(); }
+        }
+
+        public string CrdSeasonName
+        {
+            get => _model.CrdSeasonName;
+            set { _model.CrdSeasonName = value; OnPropertyChanged(); }
+        }
+
+        public string CrdOutputPath
+        {
+            get => _model.CrdOutputPath;
+            set { _model.CrdOutputPath = value; OnPropertyChanged(); }
+        }
+
+        public string CrdFilePattern
+        {
+            get => _model.CrdFilePattern;
+            set { _model.CrdFilePattern = value; OnPropertyChanged(); }
+        }
+
         // Episode tracking
         public ObservableCollection<EpisodeRelease> EpisodesReleased { get; }
 
@@ -206,6 +284,12 @@ namespace JudasEncodingManager.ViewModels
         {
             var newModel = new WeeklyShow
             {
+                DownloadMethod = DownloadMethod,
+                CrdShowId = CrdShowId,
+                CrdSeasonId = CrdSeasonId,
+                CrdSeasonName = CrdSeasonName,
+                CrdOutputPath = CrdOutputPath,
+                CrdFilePattern = CrdFilePattern,
                 IniScriptName = IniScriptName,
                 OutputTorrentTitle = OutputTorrentTitle + " (Copy)",
                 OutputFileTitle = OutputFileTitle + " Copy",
@@ -216,7 +300,7 @@ namespace JudasEncodingManager.ViewModels
                 ReleaseDay = ReleaseDay,
                 ReleaseTime = ReleaseTime,
                 ExpectedEpisodes = ExpectedEpisodes,
-                IsActive = false, // New copies start inactive
+                IsActive = false,
                 CustomEpisodeRegex = CustomEpisodeRegex,
                 SourceGroup = SourceGroup,
                 IsUncensored = IsUncensored

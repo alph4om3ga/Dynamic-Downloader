@@ -158,12 +158,18 @@
                                                     <Run Text="{Binding ReleaseTime, Mode=OneWay}"/> - <Run Text="{Binding ProgressText, Mode=OneWay}"/>
                                                 </TextBlock>
                                             </StackPanel>
-                                            <Border Grid.Column="2" 
-                                                    Background="{Binding IsActive, Converter={StaticResource BoolToColorConverter}}"
-                                                    CornerRadius="4" Padding="6,2" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding IsActive, Converter={StaticResource BoolToStatusConverter}}" 
-                                                           FontSize="10"/>
-                                            </Border>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Border Background="{Binding DownloadMethodColor}"
+                                                        CornerRadius="4" Padding="5,2" Margin="0,0,4,0">
+                                                    <TextBlock Text="{Binding ShortDownloadMethod}"
+                                                               FontSize="9" FontWeight="Bold" Foreground="White"/>
+                                                </Border>
+                                                <Border Background="{Binding IsActive, Converter={StaticResource BoolToColorConverter}}"
+                                                        CornerRadius="4" Padding="6,2">
+                                                    <TextBlock Text="{Binding IsActive, Converter={StaticResource BoolToStatusConverter}}"
+                                                               FontSize="10"/>
+                                                </Border>
+                                            </StackPanel>
                                         </Grid>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
@@ -244,19 +250,109 @@
                                 </StackPanel>
                             </Border>
 
-                            <!-- RSS Feed -->
+                            <!-- Download Source -->
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
-                                    <TextBlock Text="RSS Feed" Style="{StaticResource SectionHeader}"/>
-                                    <TextBlock Text="RSS Feed URL" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox Text="{Binding RssFeed, UpdateSourceTrigger=PropertyChanged}" 
-                                             Style="{StaticResource ModernTextBox}"/>
-                                    
-                                    <TextBlock Text="Custom Episode Regex (Optional)" Style="{StaticResource FieldLabel}" Margin="0,12,0,4"/>
-                                    <TextBox Text="{Binding CustomEpisodeRegex, UpdateSourceTrigger=PropertyChanged}" 
-                                             Style="{StaticResource ModernTextBox}"/>
-                                    <TextBlock Text="Use this to extract episode numbers from non-standard file names" 
-                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Download Source" Style="{StaticResource SectionHeader}"/>
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
+                                               Foreground="{StaticResource TextSecondaryBrush}">
+                                        <Run Text="Priority order:"/>
+                                        <Run Text=" CRD (Crunchyroll)" FontWeight="SemiBold"/>
+                                        <Run Text="→"/>
+                                        <Run Text="RSS/Torrent" FontWeight="SemiBold"/>
+                                        <Run Text="→"/>
+                                        <Run Text="aniDL" FontWeight="SemiBold"/>
+                                    </TextBlock>
+
+                                    <!-- Method selector -->
+                                    <TextBlock Text="Download Method" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox SelectedIndex="{Binding DownloadMethodIndex}"
+                                              Style="{StaticResource ModernComboBox}"
+                                              ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                                              Margin="0,0,0,16">
+                                        <ComboBoxItem Content="🎬 CRD — Crunchyroll Direct (primary)"/>
+                                        <ComboBoxItem Content="📡 RSS — Nyaa/Torrent (secondary)"/>
+                                        <ComboBoxItem Content="💾 aniDL — Streaming Backup (manual)"/>
+                                    </ComboBox>
+
+                                    <!-- ── CRD fields (visible when method = CRD) ── -->
+                                    <StackPanel Visibility="{Binding UsesCRD, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <Grid Margin="0,0,0,12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                                <TextBlock Style="{StaticResource FieldLabel}">
+                                                    <Run Text="Crunchyroll Series ID"/>
+                                                    <Run Text="  e.g. GT00378117" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"/>
+                                                </TextBlock>
+                                                <TextBox Text="{Binding CrdShowId, UpdateSourceTrigger=PropertyChanged}"
+                                                         Style="{StaticResource ModernTextBox}"
+                                                         FontFamily="Consolas" ToolTip="The series ID from the Crunchyroll URL"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                <TextBlock Text="Season ID (from CRD)" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox Text="{Binding CrdSeasonId, UpdateSourceTrigger=PropertyChanged}"
+                                                         Style="{StaticResource ModernTextBox}"
+                                                         FontFamily="Consolas" ToolTip="Season ID as shown in CRD — leave blank to use first season"/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock Text="Season Name (display only)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding CrdSeasonName, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 Margin="0,0,0,12"
+                                                 ToolTip="e.g. Season 2 — used for display only"/>
+
+                                        <TextBlock Text="CRD Output Folder" Style="{StaticResource FieldLabel}"/>
+                                        <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4" TextWrapping="Wrap">
+                                            The folder where CRD saves downloaded episodes for this show. JEM watches this folder on the release schedule.
+                                        </TextBlock>
+                                        <TextBox Text="{Binding CrdOutputPath, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 Margin="0,0,0,12"/>
+
+                                        <TextBlock Style="{StaticResource FieldLabel}">
+                                            <Run Text="File Match Pattern"/>
+                                            <Run Text="  e.g. TowerOfGod*.mkv  (blank = *.mkv)" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"/>
+                                        </TextBlock>
+                                        <TextBox Text="{Binding CrdFilePattern, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 FontFamily="Consolas"/>
+
+                                        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="6" Padding="12,8" Margin="0,12,0,0">
+                                            <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="⏱ CRD polling schedule:" FontWeight="SemiBold"/>
+                                                <Run Text=" Every 1 min for 10 min · Every 10 min for 1 hr · Every 30 min for 6 hrs · then stop until next airing."/>
+                                            </TextBlock>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <!-- ── RSS fields (visible when method = RSS) ── -->
+                                    <StackPanel Visibility="{Binding UsesRSS, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <TextBlock Text="RSS Feed URL" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding RssFeed, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 Margin="0,0,0,12"/>
+                                        <TextBlock Text="Custom Episode Regex (Optional)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding CustomEpisodeRegex, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 Margin="0,0,0,4"/>
+                                        <TextBlock Text="Extract episode numbers from non-standard filenames"
+                                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
+                                    </StackPanel>
+
+                                    <!-- ── aniDL note (visible when method = AniDL) ── -->
+                                    <Border Visibility="{Binding UsesAniDL, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Background="{StaticResource SurfaceBrush}" CornerRadius="6" Padding="12,8">
+                                        <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
+                                            <Run Text="💾 aniDL backup mode." FontWeight="SemiBold"/>
+                                            <Run Text=" Use the "/>
+                                            <Run Text="📥 Direct Download" FontWeight="SemiBold"/>
+                                            <Run Text=" button in the Automation tab to search and queue episodes manually. aniDL is not auto-monitored."/>
+                                        </TextBlock>
+                                    </Border>
                                 </StackPanel>
                             </Border>
 
@@ -612,6 +708,61 @@
                                 <!-- Options -->
                                 <CheckBox Content="Check for aniDL updates on startup"
                                           IsChecked="{Binding AniDLCheckUpdatesOnStartup}"
+                                          Style="{StaticResource ModernCheckBox}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- CRD Configuration -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="🎬 CRD — Crunchy Downloader" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
+                                           Foreground="{StaticResource TextSecondaryBrush}">
+                                    CRD.exe is the primary download source for Crunchyroll episodes.
+                                    JEM monitors the output folder on the release schedule and queues files for encoding.
+                                    Use the CRD tab to launch the app or run its built-in updater.
+                                </TextBlock>
+
+                                <!-- Path row -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Text="CRD Folder (contains CRD.exe)" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox Text="{Binding CRDPath, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource ModernTextBox}"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Browse"
+                                            Command="{Binding BrowseCRDPathCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            VerticalAlignment="Bottom"/>
+                                </Grid>
+
+                                <!-- Status row -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding CRDViewModel.Status}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               FontSize="12" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Content="🚀 Launch CRD"
+                                                Command="{Binding CRDViewModel.LaunchCRDCommand}"
+                                                Style="{StaticResource ModernButton}"
+                                                Margin="0,0,8,0"/>
+                                        <Button Content="⟳ Run Updater"
+                                                Command="{Binding CRDViewModel.RunUpdaterCommand}"
+                                                Style="{StaticResource SecondaryButton}"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <CheckBox Content="Run CRD's built-in updater automatically on startup"
+                                          IsChecked="{Binding CRDAutoUpdate}"
                                           Style="{StaticResource ModernCheckBox}"/>
                             </StackPanel>
                         </Border>
@@ -1281,6 +1432,120 @@
                                             Margin="0,16,0,0"/>
                                 </StackPanel>
                             </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- CRD Tab -->
+            <TabItem Header="🎬 CRD" Style="{StaticResource ModernTabItem}">
+                <Grid Margin="0,16,0,0" DataContext="{Binding CRDViewModel}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="360"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Left: Status + Controls -->
+                    <StackPanel Grid.Row="0" Grid.Column="0" Grid.RowSpan="2" Margin="0,0,16,0">
+
+                        <!-- Status Card -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock Text="CRD Status" Style="{StaticResource SectionHeader}"/>
+
+                                <!-- Running indicator -->
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Width="12" Height="12"
+                                            CornerRadius="6"
+                                            Background="{Binding IsRunning, Converter={StaticResource BoolToColorConverter}}"
+                                            Margin="0,0,8,0"
+                                            VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding RunningStatusText}"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <TextBlock Text="Version: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                    <TextBlock Text="{Binding InstalledVersion}" FontSize="12" FontWeight="SemiBold"/>
+                                </StackPanel>
+
+                                <TextBlock Text="{Binding Status}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                                <!-- Action buttons -->
+                                <Button Content="🚀 Launch CRD"
+                                        Command="{Binding LaunchCRDCommand}"
+                                        Style="{StaticResource ModernButton}"
+                                        HorizontalAlignment="Stretch"
+                                        Margin="0,0,0,8"/>
+                                <Button Content="⟳ Run CRD Updater"
+                                        Command="{Binding RunUpdaterCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        HorizontalAlignment="Stretch"
+                                        Margin="0,0,0,8"/>
+                                <Button Content="🔄 Refresh Status"
+                                        Command="{Binding RefreshStatusCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        HorizontalAlignment="Stretch"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Info Card -->
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="About CRD" Style="{StaticResource SectionHeader}"/>
+                                <TextBlock TextWrapping="Wrap" FontSize="11"
+                                           Foreground="{StaticResource TextSecondaryBrush}">
+                                    <Run Text="Crunchy-DL (CRD)" FontWeight="SemiBold"/>
+                                    <Run Text=" is the primary download source. Configure your shows in the Weekly Shows tab by selecting CRD as the download method and setting the Crunchyroll series ID and output folder."/>
+                                </TextBlock>
+                                <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"
+                                           Foreground="{StaticResource TextSecondaryBrush}">
+                                    <Run Text="Polling schedule per show:" FontWeight="SemiBold"/>
+                                    <LineBreak/>
+                                    <Run Text="• Every 1 min for first 10 min"/>
+                                    <LineBreak/>
+                                    <Run Text="• Every 10 min for next 1 hour"/>
+                                    <LineBreak/>
+                                    <Run Text="• Every 30 min for next 6 hours"/>
+                                    <LineBreak/>
+                                    <Run Text="• Stop — wait until next scheduled airing"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Right: Activity Log -->
+                    <Border Grid.Row="0" Grid.Column="1" Grid.RowSpan="2" Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="CRD Activity Log" Style="{StaticResource SectionHeader}"/>
+                            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                <TextBox Text="{Binding ActivityLog, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         TextWrapping="Wrap"
+                                         FontFamily="Consolas"
+                                         FontSize="11"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{StaticResource TextSecondaryBrush}"
+                                         VerticalAlignment="Top"/>
+                            </ScrollViewer>
                         </Grid>
                     </Border>
                 </Grid>

@@ -137,9 +137,11 @@ namespace JudasEncodingManager.Models
     /// </summary>
     public enum DownloadSource
     {
-        /// <summary>Detected via Nyaa RSS feed and downloaded through qBittorrent.</summary>
+        /// <summary>Downloaded via Crunchy-DL (CRD) from Crunchyroll. Primary source.</summary>
+        CRD,
+        /// <summary>Detected via Nyaa RSS feed and downloaded through qBittorrent. Secondary source.</summary>
         Rss,
-        /// <summary>Downloaded directly from a streaming service via aniDL.</summary>
+        /// <summary>Downloaded directly from a streaming service via aniDL. Backup source.</summary>
         AniDL
     }
 

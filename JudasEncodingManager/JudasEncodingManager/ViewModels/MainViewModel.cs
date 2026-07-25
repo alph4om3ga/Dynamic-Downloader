@@ -80,6 +80,9 @@ namespace JudasEncodingManager.ViewModels
         private double _aniDLUpdateProgress;
         private AniDLReleaseInfo? _aniDLLatestRelease;
 
+        // CRD
+        private CRDViewModel? _crdViewModel;
+
         public MainViewModel()
         {
             // Initialize collections
@@ -141,6 +144,10 @@ namespace JudasEncodingManager.ViewModels
             OpenLogsFolderCommand = new RelayCommand(() => OpenFolder(LogsFolder));
             ClearTempFolderCommand = new RelayCommand(ClearTempFolder);
             CleanOldLogsCommand = new RelayCommand(CleanOldLogs);
+
+            // CRD commands + ViewModel
+            BrowseCRDPathCommand = new RelayCommand(() => BrowseFolder(s => CRDPath = s, CRDPath));
+            _crdViewModel = new CRDViewModel(() => _settings);
 
             // AniDL commands
             BrowseAniDLPathCommand = new RelayCommand(() => BrowseFolder(s => AniDLPath = s, AniDLPath));
@@ -248,6 +255,13 @@ namespace JudasEncodingManager.ViewModels
         public ICommand DuplicateTrackerCommand => _duplicateTrackerCommand!;
         public ICommand SaveTrackerCommand { get; }
         public ICommand CancelEditTrackerCommand { get; }
+
+        // ==================== CRD COMMANDS / VIEWMODEL ====================
+
+        public ICommand BrowseCRDPathCommand { get; }
+
+        /// <summary>Exposes the CRD management view-model for the CRD tab.</summary>
+        public CRDViewModel CRDViewModel => _crdViewModel!;
 
         // ==================== ANIDL COMMANDS ====================
 
@@ -667,6 +681,26 @@ namespace JudasEncodingManager.ViewModels
             set { _tempFolderSize = value; OnPropertyChanged(); }
         }
 
+        // ==================== CRD PROPERTIES ====================
+
+        public string CRDPath
+        {
+            get => _settings.CRD.Path;
+            set
+            {
+                _settings.CRD.Path = value;
+                OnPropertyChanged();
+                _crdViewModel?.RefreshStatus();
+                HasUnsavedChanges = true;
+            }
+        }
+
+        public bool CRDAutoUpdate
+        {
+            get => _settings.CRD.AutoUpdate;
+            set { _settings.CRD.AutoUpdate = value; OnPropertyChanged(); HasUnsavedChanges = true; }
+        }
+
         // ==================== ANIDL PROPERTIES ====================
 
         public string AniDLPath
@@ -898,6 +932,8 @@ namespace JudasEncodingManager.ViewModels
             OnPropertyChanged(nameof(AniDLCheckUpdatesOnStartup));
             OnPropertyChanged(nameof(AniDLInstalledVersion));
             OnPropertyChanged(nameof(AniDLIsInstalled));
+            OnPropertyChanged(nameof(CRDPath));
+            OnPropertyChanged(nameof(CRDAutoUpdate));
         }
 
         // ==================== SHOW METHODS ====================

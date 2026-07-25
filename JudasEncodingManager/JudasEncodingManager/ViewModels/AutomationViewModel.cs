@@ -15,52 +15,86 @@ using System.Xml.Linq;
 using CommunityToolkit.Mvvm.Input;
 using JudasEncodingManager.Models;
 using JudasEncodingManager.Services;
+using static JudasEncodingManager.Models.DownloadMethod;
 
 namespace JudasEncodingManager.ViewModels
 {
     /// <summary>
-    /// Tracks the monitoring state for each show to implement smart RSS checking
+    /// Tracks the monitoring state for each show.
+    /// CRD shows use the exact schedule: 1min×10min → 10min×1hr → 30min×6hr → stop.
+    /// RSS shows use: 5min×1hr → 30min×6hr → 12hr.
     /// </summary>
     public class ShowMonitoringState
     {
         public string ShowId { get; set; } = "";
+        public DownloadMethod Method { get; set; } = CRD;
         public DateTime? LastCheckTime { get; set; }
         public DateTime? ReleaseWindowStart { get; set; }
         public DateTime? NextScheduledCheck { get; set; }
         public bool FoundThisWeek { get; set; }
         public int CheckCount { get; set; }
-        public TimeSpan CurrentInterval { get; set; } = TimeSpan.FromMinutes(5);
-        
-        // Interval stages
-        public static readonly TimeSpan InitialInterval = TimeSpan.FromMinutes(5);      // First hour: every 5 min
-        public static readonly TimeSpan AfterOneHour = TimeSpan.FromMinutes(30);        // 1-6 hours: every 30 min
-        public static readonly TimeSpan AfterSixHours = TimeSpan.FromHours(12);         // After 6 hours: every 12 hours
-        
+        public TimeSpan CurrentInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+        // ── CRD timing constants ────────────────────────────────────────────
+        // Phase 1: every 1 min for the first 10 min
+        // Phase 2: every 10 min until 70 min total elapsed (1 hour after phase 1)
+        // Phase 3: every 30 min until 430 min total elapsed (6 hours after phase 2)
+        // Stop:    > 430 min — wait until next scheduled airing
+        private static readonly TimeSpan CrdPhase1Interval  = TimeSpan.FromMinutes(1);
+        private static readonly TimeSpan CrdPhase2Interval  = TimeSpan.FromMinutes(10);
+        private static readonly TimeSpan CrdPhase3Interval  = TimeSpan.FromMinutes(30);
+        private static readonly double   CrdPhase1EndMin    = 10;
+        private static readonly double   CrdPhase2EndMin    = 70;   // 10 + 60
+        private static readonly double   CrdWindowEndMin    = 430;  // 70 + 360
+
+        // ── RSS timing constants ────────────────────────────────────────────
+        private static readonly TimeSpan RssInitialInterval = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan RssAfterOneHour    = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan RssAfterSixHours   = TimeSpan.FromHours(12);
+
         public void ResetForNewWeek()
         {
             FoundThisWeek = false;
             CheckCount = 0;
-            CurrentInterval = InitialInterval;
+            CurrentInterval = Method == CRD ? CrdPhase1Interval : RssInitialInterval;
             ReleaseWindowStart = null;
+            NextScheduledCheck = null;
+        }
+
+        /// <summary>
+        /// For CRD shows: returns true when the entire monitoring window (430 min) has
+        /// elapsed without finding an episode — caller should stop checking until next
+        /// scheduled airing.
+        /// </summary>
+        public bool HasWindowExpired()
+        {
+            if (Method != CRD || ReleaseWindowStart == null) return false;
+            return (DateTime.Now - ReleaseWindowStart.Value).TotalMinutes > CrdWindowEndMin;
         }
 
         public void UpdateIntervalBasedOnElapsedTime()
         {
             if (ReleaseWindowStart == null) return;
-            
+
             var elapsed = DateTime.Now - ReleaseWindowStart.Value;
-            
-            if (elapsed.TotalHours >= 6)
+
+            if (Method == CRD)
             {
-                CurrentInterval = AfterSixHours;
-            }
-            else if (elapsed.TotalHours >= 1)
-            {
-                CurrentInterval = AfterOneHour;
+                if (elapsed.TotalMinutes < CrdPhase1EndMin)
+                    CurrentInterval = CrdPhase1Interval;
+                else if (elapsed.TotalMinutes < CrdPhase2EndMin)
+                    CurrentInterval = CrdPhase2Interval;
+                else
+                    CurrentInterval = CrdPhase3Interval;
             }
             else
             {
-                CurrentInterval = InitialInterval;
+                if (elapsed.TotalHours >= 6)
+                    CurrentInterval = RssAfterSixHours;
+                else if (elapsed.TotalHours >= 1)
+                    CurrentInterval = RssAfterOneHour;
+                else
+                    CurrentInterval = RssInitialInterval;
             }
         }
     }
@@ -87,6 +121,7 @@ namespace JudasEncodingManager.ViewModels
         private TorrentService? _torrentService;
         private NyaaService? _nyaaService;
         private DiscordService? _discordService;
+        private CRDService? _crdService;
         
         // State
         private bool _isMonitoring;
@@ -212,6 +247,11 @@ namespace JudasEncodingManager.ViewModels
                 settings.TestMode
             );
             
+            // CRD
+            _crdService = new CRDService();
+            _crdService.Configure(settings.CRD.Path);
+            _crdService.LogMessage += (_, msg) => AddLogEntry(msg, ActivityLogLevel.Info);
+
             AddLogEntry("Services initialized", ActivityLogLevel.Info);
         }
 
@@ -502,31 +542,47 @@ namespace JudasEncodingManager.ViewModels
         }
 
         /// <summary>
-        /// Determines if it's time to check a show's RSS feed based on smart scheduling
+        /// Determines if it's time to check a show based on its download method and smart scheduling.
+        /// CRD: checks the output folder. RSS: polls the feed URL.
         /// </summary>
         private bool ShouldCheckShow(ShowViewModel show, out string reason)
         {
             reason = "";
-            
+
             if (!show.IsActive)
             {
                 reason = "Show is inactive";
                 return false;
             }
 
-            if (string.IsNullOrEmpty(show.RssFeed))
+            // Download-method-specific prerequisites
+            switch (show.DownloadMethod)
             {
-                reason = "No RSS feed configured";
-                return false;
+                case DownloadMethod.CRD when string.IsNullOrEmpty(show.CrdOutputPath):
+                    reason = "No CRD output folder configured";
+                    return false;
+
+                case DownloadMethod.RSS when string.IsNullOrEmpty(show.RssFeed):
+                    reason = "No RSS feed configured";
+                    return false;
+
+                case DownloadMethod.AniDL:
+                    // aniDL is triggered manually; not auto-monitored
+                    reason = "AniDL source — use Direct Download button";
+                    return false;
             }
 
             var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
-            
+
             // Get or create monitoring state
             if (!_monitoringStates.TryGetValue(showId, out var state))
             {
-                state = new ShowMonitoringState { ShowId = showId };
+                state = new ShowMonitoringState { ShowId = showId, Method = show.DownloadMethod };
                 _monitoringStates[showId] = state;
+            }
+            else
+            {
+                state.Method = show.DownloadMethod; // keep in sync if user changed method
             }
 
             var nextRelease = GetNextReleaseTime(show);
@@ -538,52 +594,54 @@ namespace JudasEncodingManager.ViewModels
 
             var now = DateTime.Now;
 
-            // Check if this is a new release window (next week started)
-            if (state.ReleaseWindowStart.HasValue)
+            // Reset state when a new weekly window begins (> 7 days since window started)
+            if (state.ReleaseWindowStart.HasValue &&
+                (now - state.ReleaseWindowStart.Value).TotalDays >= 7)
             {
-                var daysSinceWindowStart = (now - state.ReleaseWindowStart.Value).TotalDays;
-                if (daysSinceWindowStart >= 7)
-                {
-                    state.ResetForNewWeek();
-                    AddLogEntry($"New release week for {show.DisplayName}, resetting monitoring", ActivityLogLevel.Info);
-                }
+                state.ResetForNewWeek();
+                AddLogEntry($"New release week for {show.DisplayName} — monitoring reset.", ActivityLogLevel.Info);
             }
 
-            // If we already found this week's episode, don't check
             if (state.FoundThisWeek)
             {
                 reason = "Already found this week's episode";
                 return false;
             }
 
-            // Check if we're at or past the release time
+            // Not yet in the release window
             if (now < nextRelease.Value)
             {
-                var timeUntil = nextRelease.Value - now;
-                reason = $"Release in {timeUntil.Hours}h {timeUntil.Minutes}m";
+                var until = nextRelease.Value - now;
+                reason = $"Release in {until.Hours}h {until.Minutes}m";
                 return false;
             }
 
-            // We're in the release window - initialize if needed
+            // Enter the release window for the first time
             if (!state.ReleaseWindowStart.HasValue)
             {
                 state.ReleaseWindowStart = nextRelease.Value;
-                state.NextScheduledCheck = now; // Check immediately
-                AddLogEntry($"Release window started for {show.DisplayName}", ActivityLogLevel.Info);
+                state.NextScheduledCheck = now; // check immediately
+                AddLogEntry($"🔔 Release window opened for {show.DisplayName} ({show.DownloadMethod})", ActivityLogLevel.Info);
             }
 
-            // Update interval based on how long we've been waiting
-            state.UpdateIntervalBasedOnElapsedTime();
-
-            // Check if it's time for next check
-            if (state.NextScheduledCheck.HasValue && now < state.NextScheduledCheck.Value)
+            // CRD shows stop checking after the window expires (≈ 7 hours)
+            if (state.HasWindowExpired())
             {
-                var timeUntil = state.NextScheduledCheck.Value - now;
-                reason = $"Next check in {timeUntil.Minutes}m (interval: {state.CurrentInterval.TotalMinutes}m)";
+                reason = "CRD monitoring window expired — waiting for next airing";
                 return false;
             }
 
-            reason = $"Checking (interval: {state.CurrentInterval.TotalMinutes}m)";
+            // Update interval based on elapsed time in this window
+            state.UpdateIntervalBasedOnElapsedTime();
+
+            if (state.NextScheduledCheck.HasValue && now < state.NextScheduledCheck.Value)
+            {
+                var until = state.NextScheduledCheck.Value - now;
+                reason = $"Next check in {(int)until.TotalMinutes}m {until.Seconds}s (every {state.CurrentInterval.TotalMinutes}m)";
+                return false;
+            }
+
+            reason = $"Checking now (every {state.CurrentInterval.TotalMinutes}m, elapsed {(now - state.ReleaseWindowStart!.Value).TotalMinutes:F0}m)";
             return true;
         }
 
@@ -622,28 +680,34 @@ namespace JudasEncodingManager.ViewModels
         {
             IsMonitoring = true;
             IsPaused = false;
-            
+
+            InitializeServices();
+
             // Initialize monitoring states for all active shows
             foreach (var show in _shows.Where(s => s.IsActive))
             {
                 var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
                 if (!_monitoringStates.ContainsKey(showId))
                 {
-                    _monitoringStates[showId] = new ShowMonitoringState { ShowId = showId };
+                    _monitoringStates[showId] = new ShowMonitoringState
+                    {
+                        ShowId = showId,
+                        Method = show.DownloadMethod
+                    };
                 }
             }
-            
-            AddLogEntry("Started smart RSS monitoring", ActivityLogLevel.Success);
+
+            AddLogEntry("Started monitoring (CRD primary, RSS secondary, aniDL backup)", ActivityLogLevel.Success);
             LogNextCheckTimes();
 
             _monitoringCts?.Dispose();
             _monitoringCts = new CancellationTokenSource();
-            _ = MonitorRssFeedsAsync(_monitoringCts.Token);
+            _ = MonitorShowsAsync(_monitoringCts.Token);
         }
 
         private void LogNextCheckTimes()
         {
-            foreach (var show in _shows.Where(s => s.IsActive && !string.IsNullOrEmpty(s.RssFeed)))
+            foreach (var show in _shows.Where(s => s.IsActive && s.DownloadMethod != DownloadMethod.AniDL))
             {
                 var nextRelease = GetNextReleaseTime(show);
                 if (nextRelease.HasValue)
@@ -666,7 +730,7 @@ namespace JudasEncodingManager.ViewModels
             _monitoringCts?.Cancel();
             IsMonitoring = false;
             IsPaused = false;
-            AddLogEntry("Stopped RSS monitoring", ActivityLogLevel.Warning);
+            AddLogEntry("Stopped monitoring", ActivityLogLevel.Warning);
         }
 
         private void PauseQueue()
@@ -701,43 +765,68 @@ namespace JudasEncodingManager.ViewModels
             UpdateQueueSummary();
         }
 
-        private async Task MonitorRssFeedsAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Main monitoring loop — checks both CRD output folders and RSS feeds on
+        /// their respective smart schedules. Runs every 30 seconds so CRD's 1-minute
+        /// phase is honoured accurately.
+        /// </summary>
+        private async Task MonitorShowsAsync(CancellationToken cancellationToken)
         {
             while (!cancellationToken.IsCancellationRequested && IsMonitoring)
             {
                 if (!IsPaused)
                 {
-                    var activeShows = _shows.Where(s => s.IsActive && !string.IsNullOrEmpty(s.RssFeed)).ToList();
-                    var showsToCheck = new List<ShowViewModel>();
-                    
+                    var activeShows = _shows.Where(s => s.IsActive).ToList();
+                    var crdShows  = new List<ShowViewModel>();
+                    var rssShows  = new List<ShowViewModel>();
+
                     foreach (var show in activeShows)
                     {
-                        if (ShouldCheckShow(show, out var reason))
-                        {
-                            showsToCheck.Add(show);
-                        }
+                        if (!ShouldCheckShow(show, out _)) continue;
+
+                        if (show.DownloadMethod == DownloadMethod.CRD)
+                            crdShows.Add(show);
+                        else if (show.DownloadMethod == DownloadMethod.RSS)
+                            rssShows.Add(show);
                     }
 
-                    if (showsToCheck.Count > 0)
+                    // ── CRD: scan output folders ──────────────────────────
+                    if (crdShows.Count > 0)
                     {
-                        AddLogEntry($"Checking {showsToCheck.Count} RSS feed(s)...", ActivityLogLevel.Info);
-                        
-                        foreach (var show in showsToCheck)
+                        AddLogEntry($"[CRD] Scanning {crdShows.Count} output folder(s)...", ActivityLogLevel.Info);
+                        foreach (var show in crdShows)
                         {
                             if (cancellationToken.IsCancellationRequested) break;
-
                             try
                             {
-                                var foundNew = await CheckShowRssForNewEpisodeAsync(show, cancellationToken);
-                                UpdateShowMonitoringState(show, foundNew);
+                                var found = await CheckShowViaCRDAsync(show, cancellationToken);
+                                UpdateShowMonitoringState(show, found);
                             }
                             catch (Exception ex)
                             {
-                                AddLogEntry($"Error checking {show.DisplayName}: {ex.Message}", ActivityLogLevel.Error);
+                                AddLogEntry($"[CRD] Error checking {show.DisplayName}: {ex.Message}", ActivityLogLevel.Error);
                                 UpdateShowMonitoringState(show, false);
                             }
+                        }
+                    }
 
-                            // Small delay between checks to be nice to servers
+                    // ── RSS: poll feeds ────────────────────────────────────
+                    if (rssShows.Count > 0)
+                    {
+                        AddLogEntry($"[RSS] Checking {rssShows.Count} feed(s)...", ActivityLogLevel.Info);
+                        foreach (var show in rssShows)
+                        {
+                            if (cancellationToken.IsCancellationRequested) break;
+                            try
+                            {
+                                var found = await CheckShowRssForNewEpisodeAsync(show, cancellationToken);
+                                UpdateShowMonitoringState(show, found);
+                            }
+                            catch (Exception ex)
+                            {
+                                AddLogEntry($"[RSS] Error checking {show.DisplayName}: {ex.Message}", ActivityLogLevel.Error);
+                                UpdateShowMonitoringState(show, false);
+                            }
                             await Task.Delay(1000, cancellationToken);
                         }
                     }
@@ -745,14 +834,53 @@ namespace JudasEncodingManager.ViewModels
 
                 try
                 {
-                    // Main loop interval - check every minute to see if any shows need checking
-                    await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
+                    // Tick every 30 seconds so we can react to CRD's 1-minute phase promptly
+                    await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
                 }
-                catch (TaskCanceledException)
-                {
-                    break;
-                }
+                catch (TaskCanceledException) { break; }
             }
+        }
+
+        /// <summary>
+        /// Checks whether CRD has downloaded the next expected episode by scanning
+        /// the show's configured output folder.
+        /// </summary>
+        private Task<bool> CheckShowViaCRDAsync(ShowViewModel show, CancellationToken cancellationToken)
+        {
+            if (_crdService == null) return Task.FromResult(false);
+
+            var releasedEps = show.EpisodesReleased.Select(e => e.EpisodeNumber).ToHashSet();
+            var nextEp      = releasedEps.Count > 0 ? releasedEps.Max() + 1 : 1;
+
+            // Reconfigure in case the path changed since service was initialised
+            _crdService.Configure(_getSettings().CRD.Path);
+
+            var filePath = _crdService.FindEpisodeFile(show.CrdOutputPath, show.CrdFilePattern, nextEp);
+            if (filePath == null) return Task.FromResult(false);
+
+            AddLogEntry($"[CRD] ✅ Found Ep {nextEp} for {show.DisplayName}: {System.IO.Path.GetFileName(filePath)}", ActivityLogLevel.Success);
+
+            var queueItem = new QueueItem
+            {
+                Show          = show.Model,
+                EpisodeNumber = nextEp,
+                Version       = 1,
+                Status        = QueueItemStatus.Pending,
+                StatusMessage = "Queued from CRD output",
+                SourceFileName = System.IO.Path.GetFileName(filePath),
+                DownloadSource = DownloadSource.CRD
+            };
+
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                Queue.Insert(0, queueItem);
+                UpdateQueueSummary();
+            });
+
+            if (!IsProcessing)
+                _ = ProcessQueueAsync();
+
+            return Task.FromResult(true);
         }
 
         private async Task<bool> CheckShowRssForNewEpisodeAsync(ShowViewModel show, CancellationToken cancellationToken)
