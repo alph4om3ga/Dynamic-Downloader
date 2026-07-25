@@ -176,40 +176,36 @@ namespace JudasEncodingManager.ViewModels
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(UsesCRD));
                 OnPropertyChanged(nameof(UsesRSS));
-                OnPropertyChanged(nameof(UsesAniDL));
                 OnPropertyChanged(nameof(DownloadMethodIndex));
                 OnPropertyChanged(nameof(ShortDownloadMethod));
                 OnPropertyChanged(nameof(DownloadMethodColor));
             }
         }
 
-        /// <summary>ComboBox index: 0=CRD, 1=RSS, 2=AniDL</summary>
+        /// <summary>ComboBox index: 0=CRD, 1=RSS</summary>
         public int DownloadMethodIndex
         {
             get => (int)_model.DownloadMethod;
             set { DownloadMethod = (DownloadMethod)value; }
         }
 
-        public bool UsesCRD   => DownloadMethod == CRD;
-        public bool UsesRSS   => DownloadMethod == RSS;
-        public bool UsesAniDL => DownloadMethod == AniDL;
+        public bool UsesCRD => DownloadMethod == CRD;
+        public bool UsesRSS => DownloadMethod == RSS;
 
-        /// <summary>Short badge text shown in the show list, e.g. "CRD", "RSS", "DL".</summary>
+        /// <summary>Short badge text shown in the show list, e.g. "CRD", "RSS".</summary>
         public string ShortDownloadMethod => DownloadMethod switch
         {
-            CRD   => "CRD",
-            RSS   => "RSS",
-            AniDL => "DL",
-            _     => "?"
+            CRD => "CRD",
+            RSS => "RSS",
+            _   => "?"
         };
 
         /// <summary>Badge background colour for the download method.</summary>
         public string DownloadMethodColor => DownloadMethod switch
         {
-            CRD   => "#1a4a2e",   // dark green — primary
-            RSS   => "#1a2a4a",   // dark blue  — secondary
-            AniDL => "#3a2a1a",   // dark amber — backup
-            _     => "#333333"
+            CRD => "#1a4a2e",   // dark green — primary
+            RSS => "#1a2a4a",   // dark blue  — secondary
+            _   => "#333333"
         };
 
         public string CrdShowId

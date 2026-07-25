@@ -140,9 +140,7 @@ namespace JudasEncodingManager.Models
         /// <summary>Downloaded via Crunchy-DL (CRD) from Crunchyroll. Primary source.</summary>
         CRD,
         /// <summary>Detected via Nyaa RSS feed and downloaded through qBittorrent. Secondary source.</summary>
-        Rss,
-        /// <summary>Downloaded directly from a streaming service via aniDL. Backup source.</summary>
-        AniDL
+        Rss
     }
 
     public class QueueItem : INotifyPropertyChanged
@@ -159,7 +157,7 @@ namespace JudasEncodingManager.Models
         public int EpisodeNumber { get; set; }
         public int Version { get; set; } = 1;
 
-        /// <summary>Tracks whether this item came from RSS/torrent or aniDL direct download.</summary>
+        /// <summary>Tracks whether this item came from CRD or RSS/torrent.</summary>
         public DownloadSource DownloadSource { get; set; } = DownloadSource.Rss;
         
         private QueueItemStatus _status = QueueItemStatus.Pending;

@@ -131,6 +131,7 @@ namespace JudasEncodingManager.ViewModels
         private string _monitoringStatus = "Stopped";
         private ShowViewModel? _testRunSelectedShow;
         private RssItem? _testRunSelectedEpisode;
+        private int _testRunSourceIndex = 0; // 0 = CRD, 1 = RSS
         private string _testRunStatus = "Select a show and load episodes";
         private QueueItem? _selectedQueueItem;
         private CancellationTokenSource? _monitoringCts;
@@ -473,19 +474,44 @@ namespace JudasEncodingManager.ViewModels
                 OnPropertyChanged(nameof(LoadTestRunButtonLabel));
                 TestRunRssItems.Clear();
                 TestRunSelectedEpisode = null;
-                TestRunStatus = value != null ? $"Selected: {value.DisplayName} — click '{LoadTestRunButtonLabel}'" : "Select a show";
+                TestRunStatus = value != null
+                    ? $"Selected: {value.DisplayName} — choose a source and click '{LoadTestRunButtonLabel}'"
+                    : "Select a show";
                 ((AsyncRelayCommand)LoadTestRunRssItemsCommand).NotifyCanExecuteChanged();
             }
         }
 
-        /// <summary>Label for the "Load Episodes" button — adapts to the show's download method.</summary>
-        public string LoadTestRunButtonLabel => TestRunSelectedShow?.DownloadMethod switch
+        /// <summary>0 = CRD (scan output folder), 1 = RSS (load feed).</summary>
+        public int TestRunSourceIndex
         {
-            DownloadMethod.CRD   => "📁 Scan Folder",
-            DownloadMethod.RSS   => "📥 Load Feed",
-            DownloadMethod.AniDL => "📥 Load Feed",
-            _                    => "📥 Load Episodes"
-        };
+            get => _testRunSourceIndex;
+            set
+            {
+                _testRunSourceIndex = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(TestRunSourceIsCRD));
+                OnPropertyChanged(nameof(TestRunSourceIsRSS));
+                OnPropertyChanged(nameof(LoadTestRunButtonLabel));
+                // Clear loaded episodes when source changes
+                TestRunRssItems.Clear();
+                TestRunSelectedEpisode = null;
+            }
+        }
+
+        public bool TestRunSourceIsCRD
+        {
+            get => _testRunSourceIndex == 0;
+            set { if (value) TestRunSourceIndex = 0; }
+        }
+
+        public bool TestRunSourceIsRSS
+        {
+            get => _testRunSourceIndex == 1;
+            set { if (value) TestRunSourceIndex = 1; }
+        }
+
+        /// <summary>Label for the "Load Episodes" button — adapts to the selected source.</summary>
+        public string LoadTestRunButtonLabel => _testRunSourceIndex == 0 ? "📁 Scan CRD Folder" : "📥 Load RSS Feed";
 
         public RssItem? TestRunSelectedEpisode
         {
@@ -579,10 +605,6 @@ namespace JudasEncodingManager.ViewModels
                     reason = "No RSS feed configured";
                     return false;
 
-                case DownloadMethod.AniDL:
-                    // aniDL is triggered manually; not auto-monitored
-                    reason = "AniDL source — use Direct Download button";
-                    return false;
             }
 
             var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
@@ -710,7 +732,7 @@ namespace JudasEncodingManager.ViewModels
                 }
             }
 
-            AddLogEntry("Started monitoring (CRD primary, RSS secondary, aniDL backup)", ActivityLogLevel.Success);
+            AddLogEntry("Started monitoring (CRD primary, RSS secondary)", ActivityLogLevel.Success);
             LogNextCheckTimes();
 
             _monitoringCts?.Dispose();
@@ -720,7 +742,7 @@ namespace JudasEncodingManager.ViewModels
 
         private void LogNextCheckTimes()
         {
-            foreach (var show in _shows.Where(s => s.IsActive && s.DownloadMethod != DownloadMethod.AniDL))
+            foreach (var show in _shows.Where(s => s.IsActive))
             {
                 var nextRelease = GetNextReleaseTime(show);
                 if (nextRelease.HasValue)
@@ -1280,7 +1302,7 @@ namespace JudasEncodingManager.ViewModels
             TestRunRssItems.Clear();
 
             // ── CRD: scan output folder for video files ──────────────────────────────
-            if (TestRunSelectedShow.DownloadMethod == DownloadMethod.CRD)
+            if (_testRunSourceIndex == 0)
             {
                 var folder = TestRunSelectedShow.CrdOutputPath;
                 if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
@@ -1318,7 +1340,7 @@ namespace JudasEncodingManager.ViewModels
                 return;
             }
 
-            // ── RSS/AniDL: load from the show's RSS feed ─────────────────────────────
+            // ── RSS: load from the show's RSS feed ───────────────────────────────────
             if (string.IsNullOrEmpty(TestRunSelectedShow.RssFeed))
             {
                 TestRunStatus = "No RSS feed configured for this show.";
@@ -1446,7 +1468,7 @@ namespace JudasEncodingManager.ViewModels
                                         ? episode.LocalFilePath
                                         : episode.Title),
                 SourceFilePath    = episode.LocalFilePath ?? "",
-                DownloadSource    = episode.IsLocalFile ? DownloadSource.CRD : DownloadSource.Rss
+                DownloadSource    = _testRunSourceIndex == 0 ? DownloadSource.CRD : DownloadSource.Rss
             };
 
             Queue.Add(queueItem);   // append — respects existing queue order

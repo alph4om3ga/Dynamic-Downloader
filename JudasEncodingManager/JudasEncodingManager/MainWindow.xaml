@@ -73,36 +73,6 @@
             </Grid>
         </Border>
 
-        <!-- AniDL Update Notification Banner (shown only when an update is available) -->
-        <Border Grid.Row="1"
-                Padding="16,8"
-                Background="#1E3A1E"
-                Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="📦 " FontSize="14" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1"
-                           Text="{Binding AniDLUpdateStatus}"
-                           Foreground="#90EE90"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Column="2"
-                        Content="⬇ Apply Update"
-                        Command="{Binding ApplyAniDLUpdateCommand}"
-                        Style="{StaticResource ModernButton}"
-                        Margin="16,0,8,0"/>
-                <Button Grid.Column="3"
-                        Content="Later"
-                        Command="{Binding CheckAniDLUpdateCommand}"
-                        Style="{StaticResource SecondaryButton}"/>
-            </Grid>
-        </Border>
-
         <!-- Main Content -->
         <TabControl Grid.Row="2" 
                     Style="{StaticResource ModernTabControl}"
@@ -257,11 +227,9 @@
                                     <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
                                                Foreground="{StaticResource TextSecondaryBrush}">
                                         <Run Text="Priority order:"/>
-                                        <Run Text=" CRD (Crunchyroll)" FontWeight="SemiBold"/>
+                                        <Run Text=" CRD (Crunchyroll Direct)" FontWeight="SemiBold"/>
                                         <Run Text="→"/>
-                                        <Run Text="RSS/Torrent" FontWeight="SemiBold"/>
-                                        <Run Text="→"/>
-                                        <Run Text="aniDL" FontWeight="SemiBold"/>
+                                        <Run Text="RSS / Torrent" FontWeight="SemiBold"/>
                                     </TextBlock>
 
                                     <!-- Method selector -->
@@ -272,7 +240,6 @@
                                               Margin="0,0,0,16">
                                         <ComboBoxItem Content="🎬 CRD — Crunchyroll Direct (primary)"/>
                                         <ComboBoxItem Content="📡 RSS — Nyaa/Torrent (secondary)"/>
-                                        <ComboBoxItem Content="💾 aniDL — Streaming Backup (manual)"/>
                                     </ComboBox>
 
                                     <!-- ── CRD fields (visible when method = CRD) ── -->
@@ -343,16 +310,6 @@
                                                    Foreground="{StaticResource TextSecondaryBrush}" FontSize="11"/>
                                     </StackPanel>
 
-                                    <!-- ── aniDL note (visible when method = AniDL) ── -->
-                                    <Border Visibility="{Binding UsesAniDL, Converter={StaticResource BoolToVisibilityConverter}}"
-                                            Background="{StaticResource SurfaceBrush}" CornerRadius="6" Padding="12,8">
-                                        <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
-                                            <Run Text="💾 aniDL backup mode." FontWeight="SemiBold"/>
-                                            <Run Text=" Use the "/>
-                                            <Run Text="📥 Direct Download" FontWeight="SemiBold"/>
-                                            <Run Text=" button in the Automation tab to search and queue episodes manually. aniDL is not auto-monitored."/>
-                                        </TextBlock>
-                                    </Border>
                                 </StackPanel>
                             </Border>
 
@@ -642,73 +599,6 @@
                                             Style="{StaticResource SecondaryButton}" 
                                             VerticalAlignment="Bottom"/>
                                 </Grid>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- aniDL Configuration -->
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock Text="📥 aniDL (Direct Download)" Style="{StaticResource SectionHeader}"/>
-                                <TextBlock Text="multi-downloader-nx CLI for Crunchyroll, HIDIVE, and AnimationDigitalNetwork direct downloads."
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/>
-
-                                <!-- Path row -->
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                        <TextBlock Text="aniDL Folder" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox Text="{Binding AniDLPath, UpdateSourceTrigger=PropertyChanged}"
-                                                 Style="{StaticResource ModernTextBox}"/>
-                                    </StackPanel>
-                                    <Button Grid.Column="1" Content="Browse"
-                                            Command="{Binding BrowseAniDLPathCommand}"
-                                            Style="{StaticResource SecondaryButton}"
-                                            VerticalAlignment="Bottom"/>
-                                </Grid>
-
-                                <!-- Installed version + update status -->
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
-                                        <TextBlock Text="Installed: " Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
-                                        <TextBlock Text="{Binding AniDLInstalledVersion}" FontSize="12" FontWeight="SemiBold"
-                                                   Foreground="{StaticResource TextBrush}"/>
-                                    </StackPanel>
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding AniDLUpdateStatus}"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                        <Button Content="🔍 Check for Update"
-                                                Command="{Binding CheckAniDLUpdateCommand}"
-                                                Style="{StaticResource SecondaryButton}"
-                                                Margin="0,0,8,0"/>
-                                        <Button Content="⬇ Apply Update"
-                                                Command="{Binding ApplyAniDLUpdateCommand}"
-                                                Style="{StaticResource ModernButton}"
-                                                Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                                    </StackPanel>
-                                </Grid>
-
-                                <!-- Update progress bar (visible only during download) -->
-                                <ProgressBar Value="{Binding AniDLUpdateProgress}"
-                                             Minimum="0" Maximum="1" Height="4"
-                                             Margin="0,0,0,8"
-                                             Visibility="{Binding HasAniDLUpdate, Converter={StaticResource BoolToVisibilityConverter}}"/>
-
-                                <!-- Options -->
-                                <CheckBox Content="Check for aniDL updates on startup"
-                                          IsChecked="{Binding AniDLCheckUpdatesOnStartup}"
-                                          Style="{StaticResource ModernCheckBox}"/>
                             </StackPanel>
                         </Border>
 
@@ -1616,11 +1506,11 @@
                                     ToolTip="Stop monitoring and cancel all in-progress operations"
                                     Margin="0,0,8,0"/>
 
-                            <!-- Direct Download via aniDL -->
-                            <Button Grid.Column="5" Content="📥 Direct Download"
-                                    Command="{Binding OpenAniDLSearchCommand}"
+                            <!-- Direct Download via CRD -->
+                            <Button Grid.Column="5" Content="🎬 Launch CRD"
+                                    Command="{Binding CRDViewModel.LaunchCRDCommand}"
                                     Style="{StaticResource SecondaryButton}"
-                                    ToolTip="Search and download episodes directly from streaming services using aniDL"
+                                    ToolTip="Launch Crunchy-DL to download directly from Crunchyroll"
                                     Margin="0,0,16,0"/>
 
                             <!-- RSS Interval -->
@@ -1740,6 +1630,7 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Text="🧪 Test Run" Style="{StaticResource SectionHeader}"/>
@@ -1762,8 +1653,36 @@
                                             Margin="8,0,0,0"/>
                                 </Grid>
 
+                                <!-- Episode Source -->
+                                <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}"
+                                        CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="Episode Source"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <RadioButton Content="🎬 CRD"
+                                                         IsChecked="{Binding Automation.TestRunSourceIsCRD}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         Margin="0,0,12,0"
+                                                         GroupName="TestRunSource"
+                                                         ToolTip="Scan the CRD output folder for downloaded episode files"/>
+                                            <RadioButton Content="📡 RSS"
+                                                         IsChecked="{Binding Automation.TestRunSourceIsRSS}"
+                                                         Foreground="{StaticResource TextBrush}"
+                                                         GroupName="TestRunSource"
+                                                         ToolTip="Load episodes from the show's Nyaa RSS feed"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
                                 <!-- Episode Selection -->
-                                <ComboBox Grid.Row="2" 
+                                <ComboBox Grid.Row="3" 
                                           ItemsSource="{Binding Automation.TestRunRssItems}"
                                           SelectedItem="{Binding Automation.TestRunSelectedEpisode}"
                                           DisplayMemberPath="Title"
@@ -1772,7 +1691,7 @@
                                           IsEnabled="{Binding Automation.TestRunRssItems.Count}"/>
 
                                 <!-- Test Mode Toggle -->
-                                <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}" 
+                                <Border Grid.Row="4" Background="{StaticResource SurfaceBrush}" 
                                         CornerRadius="4" Padding="8" Margin="0,8,0,0">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -1796,7 +1715,7 @@
                                 </Border>
 
                                 <!-- Encode Type Toggle (only when Real is selected) -->
-                                <Border Grid.Row="4" Background="{StaticResource SurfaceBrush}" 
+                                <Border Grid.Row="5" Background="{StaticResource SurfaceBrush}" 
                                         CornerRadius="4" Padding="8" Margin="0,4,0,0"
                                         IsEnabled="{Binding Automation.CanSelectEncodeOptions}"
                                         Opacity="{Binding Automation.CanSelectEncodeOptions, Converter={StaticResource BoolToOpacityConverter}}">
@@ -1824,7 +1743,7 @@
                                 </Border>
 
                                 <!-- Post Visibility Toggle (only when Real is selected) -->
-                                <Border Grid.Row="5" Background="{StaticResource SurfaceBrush}" 
+                                <Border Grid.Row="6" Background="{StaticResource SurfaceBrush}" 
                                         CornerRadius="4" Padding="8" Margin="0,4,0,0"
                                         IsEnabled="{Binding Automation.CanSelectEncodeOptions}"
                                         Opacity="{Binding Automation.CanSelectEncodeOptions, Converter={StaticResource BoolToOpacityConverter}}">
@@ -1852,21 +1771,21 @@
                                 </Border>
 
                                 <!-- Description -->
-                                <TextBlock Grid.Row="6" 
+                                <TextBlock Grid.Row="7" 
                                            Text="{Binding Automation.TestModeDescription}"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            FontSize="10" TextWrapping="Wrap" FontStyle="Italic"
                                            Margin="0,8,0,0"/>
 
                                 <!-- Status -->
-                                <TextBlock Grid.Row="7" 
+                                <TextBlock Grid.Row="8" 
                                            Text="{Binding Automation.TestRunStatus}"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            FontSize="11" TextWrapping="Wrap"
                                            Margin="0,4,0,0"/>
 
                                 <!-- Action Buttons Row -->
-                                <Grid Grid.Row="8" Margin="0,8,0,0">
+                                <Grid Grid.Row="9" Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>

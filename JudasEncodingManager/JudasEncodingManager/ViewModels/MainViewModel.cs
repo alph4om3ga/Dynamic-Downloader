@@ -70,16 +70,6 @@ namespace JudasEncodingManager.ViewModels
         private RelayCommand? _removeTrackerCommand;
         private RelayCommand? _duplicateTrackerCommand;
 
-        // AniDL
-        private readonly AniDLService _aniDLService = new();
-        private readonly AniDLUpdateService _aniDLUpdateService = new();
-        private AsyncRelayCommand? _checkAniDLUpdateCommand;
-        private AsyncRelayCommand? _applyAniDLUpdateCommand;
-        private string _aniDLUpdateStatus = "";
-        private bool _hasAniDLUpdate;
-        private double _aniDLUpdateProgress;
-        private AniDLReleaseInfo? _aniDLLatestRelease;
-
         // CRD
         private CRDViewModel? _crdViewModel;
 
@@ -148,15 +138,6 @@ namespace JudasEncodingManager.ViewModels
             // CRD commands + ViewModel
             BrowseCRDPathCommand = new RelayCommand(() => BrowseFolder(s => CRDPath = s, CRDPath));
             _crdViewModel = new CRDViewModel(() => _settings);
-
-            // AniDL commands
-            BrowseAniDLPathCommand = new RelayCommand(() => BrowseFolder(s => AniDLPath = s, AniDLPath));
-            _checkAniDLUpdateCommand = new AsyncRelayCommand(CheckAniDLUpdateAsync);
-            _applyAniDLUpdateCommand = new AsyncRelayCommand(ApplyAniDLUpdateAsync, () => _hasAniDLUpdate && _aniDLLatestRelease?.DownloadUrl != null);
-            OpenAniDLSearchCommand = new RelayCommand(RaiseOpenAniDLSearch);
-
-            _aniDLUpdateService.StatusChanged += (_, msg) =>
-                Application.Current?.Dispatcher?.BeginInvoke(() => AniDLUpdateStatus = msg);
 
             // Set default color scheme
             _selectedColorScheme = ColorSchemes.FirstOrDefault(c => c.Name == "Dark Blue") ?? ColorSchemes.First();
@@ -262,13 +243,6 @@ namespace JudasEncodingManager.ViewModels
 
         /// <summary>Exposes the CRD management view-model for the CRD tab.</summary>
         public CRDViewModel CRDViewModel => _crdViewModel!;
-
-        // ==================== ANIDL COMMANDS ====================
-
-        public ICommand BrowseAniDLPathCommand { get; }
-        public ICommand CheckAniDLUpdateCommand => _checkAniDLUpdateCommand!;
-        public ICommand ApplyAniDLUpdateCommand => _applyAniDLUpdateCommand!;
-        public ICommand OpenAniDLSearchCommand { get; }
 
         // ==================== BASIC PROPERTIES ====================
 
@@ -701,61 +675,6 @@ namespace JudasEncodingManager.ViewModels
             set { _settings.CRD.AutoUpdate = value; OnPropertyChanged(); HasUnsavedChanges = true; }
         }
 
-        // ==================== ANIDL PROPERTIES ====================
-
-        public string AniDLPath
-        {
-            get => _settings.AniDL.Path;
-            set
-            {
-                _settings.AniDL.Path = value;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(AniDLInstalledVersion));
-                OnPropertyChanged(nameof(AniDLIsInstalled));
-                HasUnsavedChanges = true;
-            }
-        }
-
-        public bool AniDLCheckUpdatesOnStartup
-        {
-            get => _settings.AniDL.CheckUpdatesOnStartup;
-            set { _settings.AniDL.CheckUpdatesOnStartup = value; OnPropertyChanged(); HasUnsavedChanges = true; }
-        }
-
-        public string AniDLInstalledVersion =>
-            _aniDLService.GetInstalledVersion(AniDLPath);
-
-        public bool AniDLIsInstalled =>
-            _aniDLService.IsInstalled(AniDLPath);
-
-        public string AniDLUpdateStatus
-        {
-            get => _aniDLUpdateStatus;
-            set { _aniDLUpdateStatus = value; OnPropertyChanged(); }
-        }
-
-        public bool HasAniDLUpdate
-        {
-            get => _hasAniDLUpdate;
-            private set
-            {
-                _hasAniDLUpdate = value;
-                OnPropertyChanged();
-                _applyAniDLUpdateCommand?.NotifyCanExecuteChanged();
-            }
-        }
-
-        public double AniDLUpdateProgress
-        {
-            get => _aniDLUpdateProgress;
-            set { _aniDLUpdateProgress = value; OnPropertyChanged(); }
-        }
-
-        public string AniDLLatestVersion => _aniDLLatestRelease?.TagName ?? "";
-
-        /// <summary>Raised by <see cref="RaiseOpenAniDLSearch"/>; handled by MainWindow to open the dialog.</summary>
-        public event EventHandler? OpenAniDLSearchRequested;
-
         // ==================== FILE METHODS ====================
 
         private void OpenFile()
@@ -928,10 +847,6 @@ namespace JudasEncodingManager.ViewModels
             OnPropertyChanged(nameof(SeedboxQBitUrl));
             OnPropertyChanged(nameof(CurrentQBitUrl));
             OnPropertyChanged(nameof(IsQBitUrlEmpty));
-            OnPropertyChanged(nameof(AniDLPath));
-            OnPropertyChanged(nameof(AniDLCheckUpdatesOnStartup));
-            OnPropertyChanged(nameof(AniDLInstalledVersion));
-            OnPropertyChanged(nameof(AniDLIsInstalled));
             OnPropertyChanged(nameof(CRDPath));
             OnPropertyChanged(nameof(CRDAutoUpdate));
         }
@@ -1408,87 +1323,5 @@ namespace JudasEncodingManager.ViewModels
             }
         }
 
-        // ==================== ANIDL METHODS ====================
-
-        private void RaiseOpenAniDLSearch()
-        {
-            OpenAniDLSearchRequested?.Invoke(this, EventArgs.Empty);
-        }
-
-        private async Task CheckAniDLUpdateAsync()
-        {
-            try
-            {
-                AniDLUpdateStatus = "Checking for updates…";
-                var release = await _aniDLUpdateService.GetLatestReleaseAsync();
-                if (release == null)
-                {
-                    AniDLUpdateStatus = "⚠️ Could not reach GitHub.";
-                    return;
-                }
-
-                _aniDLLatestRelease = release;
-                OnPropertyChanged(nameof(AniDLLatestVersion));
-
-                var installed = AniDLInstalledVersion;
-                if (string.IsNullOrEmpty(installed))
-                {
-                    AniDLUpdateStatus = $"aniDL not found at configured path. Latest: {release.TagName}";
-                    HasAniDLUpdate = true;
-                }
-                else if (installed.TrimStart('v') != release.TagName.TrimStart('v'))
-                {
-                    AniDLUpdateStatus = $"Update available: {installed} → {release.TagName}";
-                    HasAniDLUpdate = true;
-                }
-                else
-                {
-                    AniDLUpdateStatus = $"✅ Up to date ({installed})";
-                    HasAniDLUpdate = false;
-                }
-            }
-            catch (Exception ex)
-            {
-                AniDLUpdateStatus = $"❌ Error: {ex.Message}";
-            }
-        }
-
-        private async Task ApplyAniDLUpdateAsync()
-        {
-            if (_aniDLLatestRelease == null) return;
-
-            try
-            {
-                AniDLUpdateStatus = "Downloading update…";
-                var progress = new Progress<double>(p =>
-                {
-                    AniDLUpdateProgress = p;
-                    AniDLUpdateStatus = $"Downloading… {p:P0}";
-                });
-
-                await _aniDLUpdateService.DownloadAndInstallAsync(_aniDLLatestRelease, AniDLPath, progress);
-
-                AniDLUpdateProgress = 0;
-                HasAniDLUpdate = false;
-                OnPropertyChanged(nameof(AniDLInstalledVersion));
-                OnPropertyChanged(nameof(AniDLIsInstalled));
-                AniDLUpdateStatus = $"✅ Updated to {_aniDLLatestRelease.TagName}";
-            }
-            catch (Exception ex)
-            {
-                AniDLUpdateProgress = 0;
-                AniDLUpdateStatus = $"❌ Update failed: {ex.Message}";
-            }
-        }
-
-        /// <summary>
-        /// Called by MainWindow on startup when <see cref="AniDLCheckUpdatesOnStartup"/> is true.
-        /// Runs the update check silently in the background.
-        /// </summary>
-        public async Task CheckAniDLUpdateOnStartupAsync()
-        {
-            if (!AniDLCheckUpdatesOnStartup) return;
-            await CheckAniDLUpdateAsync();
-        }
     }
 }

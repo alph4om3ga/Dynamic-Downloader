@@ -4,7 +4,6 @@ using System.Windows;
 using JudasEncodingManager.Converters;
 using JudasEncodingManager.ViewModels;
 using Microsoft.Web.WebView2.Core;
-using JudasEncodingManager.Services;
 
 namespace JudasEncodingManager
 {
@@ -45,13 +44,6 @@ namespace JudasEncodingManager
             {
                 _viewModel.QBitRefreshRequested += OnQBitRefreshRequested;
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-                _viewModel.OpenAniDLSearchRequested += OnOpenAniDLSearchRequested;
-            }
-
-            // Background aniDL update check on startup (non-blocking)
-            if (_viewModel != null)
-            {
-                _ = _viewModel.CheckAniDLUpdateOnStartupAsync();
             }
 
             // Initialize WebView2 controls
@@ -185,21 +177,6 @@ namespace JudasEncodingManager
             }
         }
 
-        private void OnOpenAniDLSearchRequested(object? sender, EventArgs e)
-        {
-            if (_viewModel == null) return;
-
-            var aniDLService = new AniDLService();
-            aniDLService.Configure(_viewModel.AniDLPath);
-
-            var vm = new AniDLSearchViewModel(aniDLService);
-            var window = new AniDLSearchWindow(vm)
-            {
-                Owner = this
-            };
-            window.ShowDialog();
-        }
-
         private void OnQBitRefreshRequested(object? sender, EventArgs e)
         {
             try
@@ -225,7 +202,6 @@ namespace JudasEncodingManager
             {
                 _viewModel.QBitRefreshRequested -= OnQBitRefreshRequested;
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
-                _viewModel.OpenAniDLSearchRequested -= OnOpenAniDLSearchRequested;
             }
             
             LocalQBitWebView?.Dispose();

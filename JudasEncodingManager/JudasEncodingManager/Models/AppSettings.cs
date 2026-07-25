@@ -46,9 +46,6 @@ namespace JudasEncodingManager.Models
         [JsonProperty("weekly_shows")]
         public List<WeeklyShow> WeeklyShows { get; set; } = new();
 
-        [JsonProperty("anidl")]
-        public AniDLSettings AniDL { get; set; } = new();
-
         [JsonProperty("crd")]
         public CRDSettings CRD { get; set; } = new();
     }
@@ -321,9 +318,7 @@ namespace JudasEncodingManager.Models
         /// <summary>Crunchy-DL (CRD) — downloads directly from Crunchyroll. Primary method.</summary>
         CRD,
         /// <summary>Nyaa RSS feed monitored via qBittorrent. Secondary method.</summary>
-        RSS,
-        /// <summary>multi-downloader-nx (aniDL) — streaming service downloader. Backup method.</summary>
-        AniDL
+        RSS
     }
 
     public class CRDSettings
@@ -335,21 +330,6 @@ namespace JudasEncodingManager.Models
         /// <summary>When true, the built-in Updater.exe is run on startup.</summary>
         [JsonProperty("auto_update")]
         public bool AutoUpdate { get; set; } = false;
-    }
-
-    public class AniDLSettings
-    {
-        /// <summary>
-        /// Path to the folder containing aniDL.exe and package.json.
-        /// </summary>
-        [JsonProperty("path")]
-        public string Path { get; set; } = @"C:\JudasEncodingManager\AniDL";
-
-        /// <summary>
-        /// When true, check GitHub for a new aniDL release every time the app starts.
-        /// </summary>
-        [JsonProperty("check_updates_on_startup")]
-        public bool CheckUpdatesOnStartup { get; set; } = true;
     }
 
     public class WeeklyShow
