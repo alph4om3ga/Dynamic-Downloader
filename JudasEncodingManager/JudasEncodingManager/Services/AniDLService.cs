@@ -153,19 +153,22 @@ namespace JudasEncodingManager.Services
         }
 
         /// <summary>
-        /// Opens an interactive console window for authentication.
+        /// Opens an interactive console window for authentication and keeps it open
+        /// after completion so the user can read the result (uses cmd /K).
         /// </summary>
         public void LaunchAuth(string service)
         {
             var exe = GetExecutablePath();
             if (!File.Exists(exe)) return;
 
+            // Wrap with cmd /K so the console window stays open after aniDL exits,
+            // allowing the user to read OAuth instructions / results.
             var startInfo = new ProcessStartInfo
             {
-                FileName = exe,
-                Arguments = $"--service {service} --auth",
+                FileName = "cmd.exe",
+                Arguments = $"/K \"{exe}\" --service {service} --auth",
                 WorkingDirectory = _aniDLDir,
-                UseShellExecute = true // Keep console visible for interactive login
+                UseShellExecute = true
             };
 
             Process.Start(startInfo);

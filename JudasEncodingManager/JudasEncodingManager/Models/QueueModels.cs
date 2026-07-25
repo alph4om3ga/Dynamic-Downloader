@@ -376,5 +376,14 @@ namespace JudasEncodingManager.Models
         public DateTime PublishDate { get; set; }
         public long Size { get; set; }
         public string InfoHash { get; set; } = "";
+
+        /// <summary>
+        /// Set when this item was sourced from a local file (e.g. CRD output folder)
+        /// rather than an RSS feed. When non-empty the torrent download stage is skipped.
+        /// </summary>
+        public string LocalFilePath { get; set; } = "";
+
+        /// <summary>True when this item represents a local file, not a torrent.</summary>
+        public bool IsLocalFile => !string.IsNullOrEmpty(LocalFilePath);
     }
 }

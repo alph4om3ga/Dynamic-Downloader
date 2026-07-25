@@ -21,19 +21,31 @@ namespace JudasEncodingManager.ViewModels
         private readonly AniDLService _service;
 
         // ===== Services dropdown =====
-        private string _selectedService = "Crunchyroll";
-        public ObservableCollection<string> Services { get; } = new()
+        // Keys are the friendly display names shown in the UI.
+        // Values are the CLI service IDs expected by multi-downloader-nx.
+        private static readonly Dictionary<string, string> ServiceIds = new()
         {
-            "Crunchyroll",
-            "Hidive",
-            "AnimationDigitalNetwork"
+            { "Crunchyroll",              "cr"     },
+            { "HIDIVE",                   "hidive" },
+            { "Animation Digital Network","adn"    },
+            { "Funimation",               "funi"   },
         };
+
+        private string _selectedService = "Crunchyroll";
+        public ObservableCollection<string> Services { get; } = new(ServiceIds.Keys);
 
         public string SelectedService
         {
             get => _selectedService;
             set { _selectedService = value; OnPropertyChanged(); }
         }
+
+        /// <summary>
+        /// Returns the CLI service ID for the currently selected display name.
+        /// Falls back to the lowercase display name if not found in the map.
+        /// </summary>
+        private string GetServiceId() =>
+            ServiceIds.TryGetValue(_selectedService, out var id) ? id : _selectedService.ToLowerInvariant();
 
         // ===== Search =====
         private string _searchQuery = "";
@@ -146,7 +158,7 @@ namespace JudasEncodingManager.ViewModels
             try
             {
                 var (results, raw) = await _service.SearchAsync(
-                    SelectedService, SearchQuery,
+                    GetServiceId(), SearchQuery,
                     line => Application.Current?.Dispatcher?.BeginInvoke(() => AppendOutput(line)),
                     _cts.Token);
 
@@ -204,7 +216,7 @@ namespace JudasEncodingManager.ViewModels
             try
             {
                 var ok = await _service.DownloadAsync(
-                    SelectedService,
+                    GetServiceId(),
                     SeasonId,
                     EpisodeSelection,
                     line => Application.Current?.Dispatcher?.BeginInvoke(() => AppendOutput(line)),
@@ -232,8 +244,10 @@ namespace JudasEncodingManager.ViewModels
 
         private void LaunchAuth()
         {
-            AppendOutput($"\n▶ Launching interactive authentication for {SelectedService}...\n(A console window will open — complete login there.)\n");
-            _service.LaunchAuth(SelectedService);
+            var id = GetServiceId();
+            AppendOutput($"\n▶ Launching authentication for {SelectedService} (service id: {id})...\n" +
+                         "(A cmd window will open — complete the login there. The window stays open when done.)\n");
+            _service.LaunchAuth(id);
         }
 
         private void Cancel()

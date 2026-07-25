@@ -170,6 +170,7 @@ namespace JudasEncodingManager.ViewModels
             LoadTestRunRssItemsCommand = new AsyncRelayCommand(LoadTestRunRssItemsAsync, () => TestRunSelectedShow != null);
             StartTestRunCommand = new AsyncRelayCommand(StartTestRunAsync, () => TestRunSelectedEpisode != null && !IsProcessing && !IsTestRunning);
             CancelTestRunCommand = new RelayCommand(CancelTestRun, () => IsTestRunning);
+            QueueManualReleaseCommand = new AsyncRelayCommand(QueueManualReleaseAsync, () => TestRunSelectedEpisode != null);
 
             // Activity log
             ClearActivityLogCommand = new RelayCommand(ClearActivityLog);
@@ -275,6 +276,7 @@ namespace JudasEncodingManager.ViewModels
         public ICommand LoadTestRunRssItemsCommand { get; }
         public ICommand StartTestRunCommand { get; }
         public ICommand CancelTestRunCommand { get; }
+        public ICommand QueueManualReleaseCommand { get; }
         public ICommand ClearActivityLogCommand { get; }
 
         // ==================== TEST MODE PROPERTIES ====================
@@ -468,12 +470,22 @@ namespace JudasEncodingManager.ViewModels
             {
                 _testRunSelectedShow = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(LoadTestRunButtonLabel));
                 TestRunRssItems.Clear();
                 TestRunSelectedEpisode = null;
-                TestRunStatus = value != null ? $"Selected: {value.DisplayName} - Click 'Load Episodes'" : "Select a show";
+                TestRunStatus = value != null ? $"Selected: {value.DisplayName} — click '{LoadTestRunButtonLabel}'" : "Select a show";
                 ((AsyncRelayCommand)LoadTestRunRssItemsCommand).NotifyCanExecuteChanged();
             }
         }
+
+        /// <summary>Label for the "Load Episodes" button — adapts to the show's download method.</summary>
+        public string LoadTestRunButtonLabel => TestRunSelectedShow?.DownloadMethod switch
+        {
+            DownloadMethod.CRD   => "📁 Scan Folder",
+            DownloadMethod.RSS   => "📥 Load Feed",
+            DownloadMethod.AniDL => "📥 Load Feed",
+            _                    => "📥 Load Episodes"
+        };
 
         public RssItem? TestRunSelectedEpisode
         {
@@ -487,6 +499,7 @@ namespace JudasEncodingManager.ViewModels
                     TestRunStatus = $"Ready to test: {value.Title}";
                 }
                 ((AsyncRelayCommand)StartTestRunCommand).NotifyCanExecuteChanged();
+                ((AsyncRelayCommand)QueueManualReleaseCommand).NotifyCanExecuteChanged();
             }
         }
 
@@ -1262,14 +1275,57 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task LoadTestRunRssItemsAsync()
         {
-            if (TestRunSelectedShow == null || string.IsNullOrEmpty(TestRunSelectedShow.RssFeed))
+            if (TestRunSelectedShow == null) return;
+
+            TestRunRssItems.Clear();
+
+            // ── CRD: scan output folder for video files ──────────────────────────────
+            if (TestRunSelectedShow.DownloadMethod == DownloadMethod.CRD)
             {
-                TestRunStatus = "No RSS feed configured for this show";
+                var folder = TestRunSelectedShow.CrdOutputPath;
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                {
+                    TestRunStatus = "CRD output folder is not configured or does not exist.";
+                    return;
+                }
+
+                TestRunStatus = "Scanning CRD output folder...";
+
+                var videoFiles = Directory.GetFiles(folder, "*.mkv", SearchOption.TopDirectoryOnly)
+                    .Concat(Directory.GetFiles(folder, "*.mp4", SearchOption.TopDirectoryOnly))
+                    .OrderByDescending(f => File.GetLastWriteTime(f))
+                    .Take(30)
+                    .ToList();
+
+                foreach (var file in videoFiles)
+                {
+                    var info = new FileInfo(file);
+                    TestRunRssItems.Add(new RssItem
+                    {
+                        Title       = info.Name,
+                        LocalFilePath = file,
+                        PublishDate = info.LastWriteTime,
+                        Size        = info.Length
+                    });
+                }
+
+                TestRunStatus = videoFiles.Count > 0
+                    ? $"Found {videoFiles.Count} file(s) in CRD output folder."
+                    : "No .mkv / .mp4 files found in the CRD output folder.";
+
+                AddLogEntry($"[CRD] Scanned {folder} — {videoFiles.Count} file(s) for {TestRunSelectedShow.DisplayName}",
+                    ActivityLogLevel.Info);
+                return;
+            }
+
+            // ── RSS/AniDL: load from the show's RSS feed ─────────────────────────────
+            if (string.IsNullOrEmpty(TestRunSelectedShow.RssFeed))
+            {
+                TestRunStatus = "No RSS feed configured for this show.";
                 return;
             }
 
             TestRunStatus = "Loading RSS feed...";
-            TestRunRssItems.Clear();
 
             try
             {
@@ -1277,40 +1333,35 @@ namespace JudasEncodingManager.ViewModels
                 client.Timeout = TimeSpan.FromSeconds(15);
                 var response = await client.GetStringAsync(TestRunSelectedShow.RssFeed);
 
-                var doc = XDocument.Parse(response);
+                var doc    = XDocument.Parse(response);
                 var nyaaNs = XNamespace.Get("https://nyaa.si/xmlns/nyaa");
 
-                var items = doc.Descendants("item").Take(20).ToList();
-
-                foreach (var item in items)
+                foreach (var item in doc.Descendants("item").Take(20))
                 {
                     var rssItem = new RssItem
                     {
-                        Title = item.Element("title")?.Value ?? "Unknown",
-                        Link = item.Element("link")?.Value ?? "",
+                        Title      = item.Element("title")?.Value ?? "Unknown",
+                        Link       = item.Element("link")?.Value ?? "",
                         TorrentUrl = item.Element("link")?.Value ?? "",
-                        InfoHash = item.Element(nyaaNs + "infoHash")?.Value ?? ""
+                        InfoHash   = item.Element(nyaaNs + "infoHash")?.Value ?? ""
                     };
 
-                    if (DateTime.TryParse(item.Element("pubDate")?.Value, out var pubDate))
-                    {
-                        rssItem.PublishDate = pubDate;
-                    }
+                    if (DateTime.TryParse(item.Element("pubDate")?.Value, out var pub))
+                        rssItem.PublishDate = pub;
 
-                    if (long.TryParse(item.Element(nyaaNs + "size")?.Value, out var size))
-                    {
-                        rssItem.Size = size;
-                    }
+                    if (long.TryParse(item.Element(nyaaNs + "size")?.Value, out var sz))
+                        rssItem.Size = sz;
 
                     TestRunRssItems.Add(rssItem);
                 }
 
-                TestRunStatus = $"Loaded {TestRunRssItems.Count} episodes from RSS";
-                AddLogEntry($"Loaded {TestRunRssItems.Count} items from {TestRunSelectedShow.DisplayName} RSS", ActivityLogLevel.Info);
+                TestRunStatus = $"Loaded {TestRunRssItems.Count} episode(s) from RSS.";
+                AddLogEntry($"Loaded {TestRunRssItems.Count} items from {TestRunSelectedShow.DisplayName} RSS",
+                    ActivityLogLevel.Info);
             }
             catch (Exception ex)
             {
-                TestRunStatus = $"Error: {ex.Message}";
+                TestRunStatus = $"Error loading RSS: {ex.Message}";
                 AddLogEntry($"Failed to load RSS: {ex.Message}", ActivityLogLevel.Error);
             }
         }
@@ -1366,6 +1417,48 @@ namespace JudasEncodingManager.ViewModels
         {
             _testRunCts?.Cancel();
             AddLogEntry("Cancelling test run...", ActivityLogLevel.Warning);
+        }
+
+        /// <summary>
+        /// Adds the selected episode directly to the main Queue as a full (non-test) release.
+        /// Multiple episodes can be queued this way and processed sequentially — the main use
+        /// case is catching up on missed episodes without going through the interactive test flow.
+        /// </summary>
+        private Task QueueManualReleaseAsync()
+        {
+            if (TestRunSelectedShow == null || TestRunSelectedEpisode == null)
+                return Task.CompletedTask;
+
+            var show    = TestRunSelectedShow;
+            var episode = TestRunSelectedEpisode;
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+
+            var queueItem = new QueueItem
+            {
+                Show              = show.Model,
+                EpisodeNumber     = episodeNumber ?? 1,
+                Version           = version,
+                Status            = QueueItemStatus.Pending,
+                StatusMessage     = "Manual release — queued",
+                IsTestRun         = false,              // full encode + public post
+                TorrentHash       = episode.InfoHash,
+                SourceFileName    = Path.GetFileName(episode.LocalFilePath.Length > 0
+                                        ? episode.LocalFilePath
+                                        : episode.Title),
+                SourceFilePath    = episode.LocalFilePath ?? "",
+                DownloadSource    = episode.IsLocalFile ? DownloadSource.CRD : DownloadSource.Rss
+            };
+
+            Queue.Add(queueItem);   // append — respects existing queue order
+            UpdateQueueSummary();
+
+            TestRunStatus = $"✅ Ep {episodeNumber} queued for release — check the Queue panel.";
+            AddLogEntry($"📋 Manual release queued: {queueItem.OutputFileName}", ActivityLogLevel.Success);
+
+            if (!IsProcessing)
+                _ = ProcessQueueAsync();
+
+            return Task.CompletedTask;
         }
 
         private async Task RunSimulatedTestAsync(ShowViewModel show, RssItem episode, CancellationToken ct)
@@ -1476,7 +1569,39 @@ namespace JudasEncodingManager.ViewModels
 
             try
             {
-                // ==================== STAGE 1: Download ====================
+                // ==================== STAGE 1: Acquire Source File ====================
+                // For CRD shows the file is already on disk — skip the torrent download.
+                if (episode.IsLocalFile)
+                {
+                    AddLogEntry($"[CRD] Using local file: {Path.GetFileName(episode.LocalFilePath)}", ActivityLogLevel.Success);
+                    queueItem.SourceFilePath    = episode.LocalFilePath;
+                    queueItem.SourceFileName    = Path.GetFileName(episode.LocalFilePath);
+                    queueItem.SourceFileSizeBytes = new FileInfo(episode.LocalFilePath).Length;
+                    queueItem.Status            = QueueItemStatus.DownloadComplete;
+                    queueItem.StatusMessage     = "CRD file ready";
+                    TestRunStatus               = "[CRD] Source file ready — skipping download.";
+                    TestRunProgress             = 15;
+
+                    // Move to encoding folder so the encode scripts can find it.
+                    var settings2         = _getSettings();
+                    var encodingFolder2   = settings2.Folders.EncodingFolder;
+                    var srcFileName2      = Path.GetFileName(queueItem.SourceFilePath);
+                    var destPath2         = Path.Combine(encodingFolder2, srcFileName2);
+                    Directory.CreateDirectory(Path.Combine(encodingFolder2, "video"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder2, "audio-subs"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder2, "data"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder2, "done"));
+                    if (queueItem.SourceFilePath != destPath2)
+                    {
+                        if (File.Exists(destPath2)) File.Delete(destPath2);
+                        File.Copy(queueItem.SourceFilePath, destPath2); // copy, keep original in CRD folder
+                        queueItem.SourceFilePath = destPath2;
+                        AddLogEntry($"Copied to encoding folder: {encodingFolder2}", ActivityLogLevel.Info);
+                    }
+                }
+                else
+                {
+                // ── RSS: download via qBittorrent ────────────────────────────────────
                 queueItem.Status = QueueItemStatus.Downloading;
                 queueItem.StatusMessage = "Adding torrent to qBittorrent...";
                 TestRunStatus = "Downloading torrent...";
@@ -1637,6 +1762,7 @@ namespace JudasEncodingManager.ViewModels
                 
                 queueItem.Status = QueueItemStatus.DownloadComplete;
                 TestRunProgress = 15;
+                } // end else (torrent download path)
 
                 // ==================== STAGE 2: Analyze Tracks ====================
                 queueItem.Status = QueueItemStatus.AnalyzingTracks;

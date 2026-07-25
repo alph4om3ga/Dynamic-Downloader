@@ -1755,7 +1755,8 @@
                                               SelectedItem="{Binding Automation.TestRunSelectedShow}"
                                               DisplayMemberPath="DisplayName"
                                               Style="{StaticResource ModernComboBox}"/>
-                                    <Button Grid.Column="1" Content="📥 Load Episodes" 
+                                    <Button Grid.Column="1"
+                                            Content="{Binding Automation.LoadTestRunButtonLabel}"
                                             Command="{Binding Automation.LoadTestRunRssItemsCommand}"
                                             Style="{StaticResource SecondaryButton}"
                                             Margin="8,0,0,0"/>
@@ -1864,23 +1865,36 @@
                                            FontSize="11" TextWrapping="Wrap"
                                            Margin="0,4,0,0"/>
 
-                                <!-- Start Buttons -->
+                                <!-- Action Buttons Row -->
                                 <Grid Grid.Row="8" Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <ProgressBar Grid.Column="0" 
-                                                 Value="{Binding Automation.TestRunProgress}" 
+
+                                    <!-- Progress bar (shown while running) -->
+                                    <ProgressBar Grid.Column="0"
+                                                 Value="{Binding Automation.TestRunProgress}"
                                                  Maximum="100"
-                                                 Height="6" 
+                                                 Height="6"
                                                  Margin="0,0,8,0"
                                                  Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                                    <Button Grid.Column="1" Content="🚀 Start" 
+
+                                    <!-- Queue Release — always visible when an episode is selected -->
+                                    <Button Grid.Column="1"
+                                            Content="📋 Queue Release"
+                                            Command="{Binding Automation.QueueManualReleaseCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            Margin="0,0,8,0"
+                                            ToolTip="Add this episode to the main queue as a full (non-test) release. Use this to catch up on missed episodes — multiple episodes can be queued."/>
+
+                                    <!-- Start Test Run / Cancel -->
+                                    <Button Grid.Column="2" Content="🚀 Start Test"
                                             Command="{Binding Automation.StartTestRunCommand}"
                                             Style="{StaticResource ModernButton}"
                                             Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource InverseBoolToVisibilityConverter}}"/>
-                                    <Button Grid.Column="1" Content="🛑 Cancel" 
+                                    <Button Grid.Column="2" Content="🛑 Cancel"
                                             Command="{Binding Automation.CancelTestRunCommand}"
                                             Style="{StaticResource DangerButton}"
                                             Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource BoolToVisibilityConverter}}"/>
