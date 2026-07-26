@@ -767,10 +767,8 @@ namespace JudasEncodingManager.Services
                 item.StatusMessage = "Uploading episode...";
                 Log("📤 Uploading episode...", ActivityLogLevel.Info, item);
 
-                var showFolder = $"[Judas] {item.Show.OutputTorrentTitle}";
                 var episodeUpload = await _ftpService.UploadEpisodeAsync(
                     item.EncodedFilePath,
-                    showFolder,
                     Path.GetFileName(item.EncodedFilePath),
                     cancellationToken);
 
