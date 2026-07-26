@@ -121,20 +121,18 @@ namespace JudasEncodingManager.Services
                 // Description
                 content.Add(new StringContent(description), "description");
 
-                // Flags based on isHidden parameter
+                // Flags based on isHidden parameter.
+                // Nyaa treats these as HTML checkboxes: the field must be ABSENT (not "0")
+                // to leave it unchecked. Sending is_hidden="0" still hides the torrent.
                 if (isHidden)
                 {
-                    // Hidden release: not visible to public, use for testing/review
-                    content.Add(new StringContent("0"), "is_remake");    // NOT remake
-                    content.Add(new StringContent("1"), "is_hidden");    // HIDDEN
-                    content.Add(new StringContent("0"), "is_complete");  // Not complete
+                    // Hidden release: send is_hidden=1; omit is_remake (leave unchecked)
+                    content.Add(new StringContent("1"), "is_hidden");
                 }
                 else
                 {
-                    // Normal public release: use Remake flag
-                    content.Add(new StringContent("1"), "is_remake");    // Remake flag checked
-                    content.Add(new StringContent("0"), "is_hidden");    // Not hidden
-                    content.Add(new StringContent("0"), "is_complete");  // Not complete (weekly release)
+                    // Public release: send is_remake=1; omit is_hidden entirely (leave unchecked)
+                    content.Add(new StringContent("1"), "is_remake");
                 }
 
                 // Add cookies to request
