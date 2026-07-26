@@ -53,6 +53,7 @@ namespace JudasEncodingManager.Services
         public string DescriptionTemplatePath { get; set; } = "";
         public bool IsTestMode { get; set; }
         public int RssCheckIntervalMinutes { get; set; } = 5;
+        public string SeedboxReleasesPath { get; set; } = "Releases/";
 
         public QueueManager()
         {
@@ -166,6 +167,7 @@ namespace JudasEncodingManager.Services
                 settings.TestMode);
 
             IsTestMode = settings.TestMode;
+            SeedboxReleasesPath = settings.QBittorrent.SeedboxReleasesPath;
             
             // Set description template path
             DescriptionTemplatePath = Path.Combine(EncodingFolder, "NyaaDescriptionTemplate.txt");
@@ -790,7 +792,7 @@ namespace JudasEncodingManager.Services
 
                 var seedboxAdded = await _qbitService.AddTorrentFileAsync(
                     item.TorrentFilePath,
-                    showFolder,
+                    SeedboxReleasesPath,
                     isLocal: false);
                 
                 if (seedboxAdded)
