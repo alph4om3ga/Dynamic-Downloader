@@ -257,7 +257,7 @@ namespace JudasEncodingManager.ViewModels
             _crdService.Configure(settings.CRD.Path);
             _crdService.LogMessage += (_, msg) => AddLogEntry(msg, ActivityLogLevel.Info);
 
-            _logsFolder = settings.LogsFolder;
+            _logsFolder = settings.Folders.LogsFolder;
 
             AddLogEntry("Services initialized", ActivityLogLevel.Info);
         }
