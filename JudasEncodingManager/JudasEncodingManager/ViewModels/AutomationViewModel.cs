@@ -1872,9 +1872,9 @@ namespace JudasEncodingManager.ViewModels
                     if (queueItem.SourceFilePath != destPath2)
                     {
                         if (File.Exists(destPath2)) File.Delete(destPath2);
-                        File.Copy(queueItem.SourceFilePath, destPath2); // copy, keep original in CRD folder
+                        File.Move(queueItem.SourceFilePath, destPath2);
                         queueItem.SourceFilePath = destPath2;
-                        AddLogEntry($"Copied to encoding folder: {encodingFolder2}", ActivityLogLevel.Info);
+                        AddLogEntry($"Moved to encoding folder: {encodingFolder2}", ActivityLogLevel.Info);
                     }
                 }
                 else
