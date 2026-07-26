@@ -71,64 +71,111 @@ namespace JudasEncodingManager.Models
         
         // Priority for sorting (lower = higher priority)
         public int SortPriority => GetLanguagePriority(Language, Title);
-        
+
+        /// <summary>
+        /// Language code to write with --language, normalising generic codes to BCP-47
+        /// where the source didn't already supply the specific variant.
+        /// e.g. "pt" + "Brazilian" title → "pt-BR"; "es" + "Latin" title → "es-419"
+        /// </summary>
+        public string NormalizedLanguage
+        {
+            get
+            {
+                var langLower = Language.ToLowerInvariant();
+                var titleLower = Title.ToLowerInvariant();
+
+                // Already a specific BCP-47 tag — keep it
+                if (langLower is "es-es" or "es-419" or "pt-br")
+                    return Language;
+
+                // Generic Spanish → derive from title
+                if (langLower is "spa" or "es")
+                    return (titleLower.Contains("lat") || titleLower.Contains("latin")) ? "es-419" : "es-ES";
+
+                // Generic Portuguese → pt-BR when title indicates Brazil, else keep "pt"
+                if (langLower is "por" or "pt")
+                    return (titleLower.Contains("br") || titleLower.Contains("brazil")) ? "pt-BR" : Language;
+
+                return Language;
+            }
+        }
+
         private static int GetLanguagePriority(string lang, string title)
         {
-            // English first, then common languages in order
             var langLower = lang.ToLowerInvariant();
             var titleLower = title.ToLowerInvariant();
-            
-            // Check for regional variants in title
-            if (langLower == "spa" || langLower == "es")
+
+            // English — sub-sorted: plain (10) → CC (20) → Signs (30)
+            if (langLower is "eng" or "en")
             {
-                if (titleLower.Contains("lat") || titleLower.Contains("latin"))
-                    return 6; // Spanish[LAT]
-                return 5; // Spanish[ESP]
+                if (titleLower.Contains("cc") || titleLower.Contains("closed") || titleLower.Contains("sdh"))
+                    return 20;
+                if (titleLower.Contains("sign"))
+                    return 30;
+                return 10;
             }
-            
-            if (langLower == "por" || langLower == "pt")
-            {
-                if (titleLower.Contains("br") || titleLower.Contains("brazil"))
-                    return 7; // Portuguese[BR]
-                return 7; // Portuguese (same priority)
-            }
-            
+
+            // French, German, Italian
+            if (langLower is "fre" or "fr") return 40;
+            if (langLower is "ger" or "de") return 50;
+            if (langLower is "ita" or "it") return 60;
+
+            // Spanish — European first, then Latin American
+            if (langLower == "es-es") return 70;
+            if (langLower == "es-419") return 80;
+            if (langLower is "spa" or "es")
+                return (titleLower.Contains("lat") || titleLower.Contains("latin")) ? 80 : 70;
+
+            // Portuguese
+            if (langLower is "por" or "pt" or "pt-br") return 90;
+
+            // Remaining languages
             return langLower switch
             {
-                "eng" or "en" => 1,
-                "fre" or "fr" => 2,
-                "ger" or "de" => 3,
-                "ita" or "it" => 4,
-                "rus" or "ru" => 8,
-                "ara" or "ar" => 9,
-                "chi" or "zh" or "zho" => 10, // Chinese (simplified/traditional)
-                "jpn" or "ja" => 11,
-                _ => 100 // Unknown languages last
+                "rus" or "ru"            => 100,
+                "ara" or "ar"            => 110,
+                "chi" or "zh" or "zho"   => 120,
+                "kor" or "ko"            => 130,
+                "jpn" or "ja"            => 140,
+                _                        => 1000
             };
         }
-        
+
         public string GetDisplayName()
         {
-            var name = LanguageDisplay;
-            
-            // Add regional variant if applicable
-            var titleLower = Title.ToLowerInvariant();
             var langLower = Language.ToLowerInvariant();
-            
-            if ((langLower == "spa" || langLower == "es") && (titleLower.Contains("lat") || titleLower.Contains("latin")))
-                name = "Spanish[LAT]";
-            else if ((langLower == "spa" || langLower == "es"))
-                name = "Spanish[ESP]";
-            else if ((langLower == "por" || langLower == "pt") && (titleLower.Contains("br") || titleLower.Contains("brazil")))
-                name = "Portuguese[BR]";
-            else if (titleLower.Contains("simplified") || (langLower.StartsWith("zh") && titleLower.Contains("chs")))
-                name = "Simplified_CR";
-            else if (titleLower.Contains("traditional") || (langLower.StartsWith("zh") && titleLower.Contains("cht")))
-                name = "Traditional_CR";
-            else if (langLower == "chi" || langLower == "zh" || langLower == "zho")
-                name = "CR"; // Generic Chinese
-                
-            return name;
+            var titleLower = Title.ToLowerInvariant();
+
+            // Chinese variants
+            if (titleLower.Contains("simplified") || (langLower.StartsWith("zh") && titleLower.Contains("chs")))
+                return "Simplified_CR";
+            if (titleLower.Contains("traditional") || (langLower.StartsWith("zh") && titleLower.Contains("cht")))
+                return "Traditional_CR";
+            if (langLower is "chi" or "zh" or "zho")
+                return "CR";
+
+            // Spanish — always use [ESP]/[LAT] labels regardless of what the title says
+            if (langLower is "es-419" || (langLower is "spa" or "es" && (titleLower.Contains("lat") || titleLower.Contains("latin"))))
+                return "Spanish[LAT]";
+            if (langLower is "spa" or "es" or "es-es")
+                return "Spanish[ESP]";
+
+            // Portuguese — always [BR] label when Brazilian
+            if (langLower is "pt-br" || (langLower is "por" or "pt" && (titleLower.Contains("br") || titleLower.Contains("brazil"))))
+                return "Portuguese[BR]";
+            if (langLower is "por" or "pt")
+                return "Portuguese";
+
+            // English CC / Signs — bracket notation
+            var baseName = LanguageDisplay; // e.g. "English", "French", …
+            if (titleLower.Contains("cc") || titleLower.Contains("closed") || titleLower.Contains("sdh"))
+                return $"{baseName} [CC]";
+            if (titleLower.Contains("sign"))
+                return $"{baseName} [Signs]";
+
+            // Everything else: use the language display name (ignores noisy source titles
+            // like "Bahasa Indonesia" — LanguageDisplay is already "Indonesian")
+            return LanguageDisplay;
         }
     }
 

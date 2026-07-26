@@ -412,13 +412,11 @@ namespace JudasEncodingManager.Services
                     args.Add($"\"{track.Index}:{trackName}\"");
                     args.Add("--language");
                     args.Add($"\"{track.Index}:{track.Language}\"");
-                    
-                    // First Japanese track is default
-                    if (i == 0)
-                    {
-                        args.Add("--default-track");
-                        args.Add($"\"{track.Index}:yes\"");
-                    }
+
+                    // Default only when it is the sole audio track; otherwise let the user choose
+                    var isDefault = orderedAudio.Count == 1 && i == 0;
+                    args.Add("--default-track");
+                    args.Add($"\"{track.Index}:{(isDefault ? "yes" : "no")}\"");
                 }
             }
 
@@ -435,18 +433,16 @@ namespace JudasEncodingManager.Services
                 {
                     var track = orderedSubs[i];
                     var displayName = track.GetDisplayName();
-                    
+
                     args.Add("--track-name");
                     args.Add($"\"{track.Index}:{displayName}\"");
                     args.Add("--language");
-                    args.Add($"\"{track.Index}:{track.Language}\"");
-                    
-                    // First English track is default
-                    if (i == 0 && (track.Language.ToLowerInvariant() is "eng" or "en"))
-                    {
-                        args.Add("--default-track");
-                        args.Add($"\"{track.Index}:yes\"");
-                    }
+                    args.Add($"\"{track.Index}:{track.NormalizedLanguage}\"");
+
+                    // Default only when it is the sole subtitle track; otherwise let the user choose
+                    var isDefault = orderedSubs.Count == 1 && i == 0;
+                    args.Add("--default-track");
+                    args.Add($"\"{track.Index}:{(isDefault ? "yes" : "no")}\"");
                 }
             }
 
@@ -689,21 +685,22 @@ namespace JudasEncodingManager.Services
 
             // === AUDIO TRACKS ===
             // Just use language name (Japanese, English) for audio track names
-            for (int i = 0; i < trackInfo.AudioTrackIds.Count && i < item.AudioTracks.Count; i++)
+            var audioCount = Math.Min(trackInfo.AudioTrackIds.Count, item.AudioTracks.Count);
+            for (int i = 0; i < audioCount; i++)
             {
                 var mkvTrackId = trackInfo.AudioTrackIds[i];
                 var trackData = item.AudioTracks[i];
-                // Simple language name for audio tracks
                 var trackName = trackData.LanguageDisplay;
-                
+
                 args.Add("--track-name");
                 args.Add($"\"{mkvTrackId}:{trackName}\"");
                 args.Add("--language");
                 args.Add($"\"{mkvTrackId}:{trackData.Language}\"");
-                
-                // First track is default
+
+                // Default only when it is the sole audio track; otherwise let the user choose
+                var isDefault = audioCount == 1 && i == 0;
                 args.Add("--default-track");
-                args.Add($"\"{mkvTrackId}:{(i == 0 ? "yes" : "no")}\"");
+                args.Add($"\"{mkvTrackId}:{(isDefault ? "yes" : "no")}\"");
             }
 
             // === SUBTITLE TRACKS ===
@@ -741,14 +738,14 @@ namespace JudasEncodingManager.Services
             {
                 var sub = orderedSubs[i];
                 var displayName = sub.Track.GetDisplayName();
-                
+
                 args.Add("--track-name");
                 args.Add($"\"{sub.MkvId}:{displayName}\"");
                 args.Add("--language");
-                args.Add($"\"{sub.MkvId}:{sub.Track.Language}\"");
-                
-                // First English track is default
-                var isDefault = (i == 0 && sub.Track.Language.ToLowerInvariant() is "eng" or "en");
+                args.Add($"\"{sub.MkvId}:{sub.Track.NormalizedLanguage}\"");
+
+                // Default only when it is the sole subtitle track; otherwise let the user choose
+                var isDefault = orderedSubs.Count == 1 && i == 0;
                 args.Add("--default-track");
                 args.Add($"\"{sub.MkvId}:{(isDefault ? "yes" : "no")}\"");
             }
