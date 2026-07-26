@@ -245,66 +245,11 @@
                                     <!-- ── CRD fields (visible when method = CRD) ── -->
                                     <StackPanel Visibility="{Binding UsesCRD, Converter={StaticResource BoolToVisibilityConverter}}">
 
-                                        <!-- Series ID row + Search button -->
-                                        <Grid Margin="0,0,0,8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                                <TextBlock Style="{StaticResource FieldLabel}">
-                                                    <Run Text="Crunchyroll Series ID"/>
-                                                    <Run Text="  e.g. GT00378117" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10"/>
-                                                </TextBlock>
-                                                <TextBox Text="{Binding CrdShowId, UpdateSourceTrigger=PropertyChanged}"
-                                                         Style="{StaticResource ModernTextBox}"
-                                                         FontFamily="Consolas"
-                                                         ToolTip="The series ID from the Crunchyroll URL — or click 🔍 to search"/>
-                                            </StackPanel>
-                                            <Button Grid.Column="1"
-                                                    Content="🔍 Search CR"
-                                                    Command="{Binding DataContext.OpenCrunchyrollSearchCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    Style="{StaticResource SecondaryButton}"
-                                                    VerticalAlignment="Bottom"
-                                                    ToolTip="Search Crunchyroll for this show and auto-fill the Series ID"/>
-                                        </Grid>
-
-                                        <!-- Crunchyroll title (read-only, set by search) -->
-                                        <TextBlock Text="Crunchyroll Title" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox Text="{Binding CrdShowTitle, Mode=OneWay}"
-                                                 Style="{StaticResource ModernTextBox}"
-                                                 IsReadOnly="True"
-                                                 Opacity="0.7"
-                                                 Margin="0,0,0,12"
-                                                 ToolTip="Set automatically after a successful CR search — read-only"/>
-
-                                        <!-- Season ComboBox + Load Seasons button -->
-                                        <Grid Margin="0,0,0,12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                                <TextBlock Text="Season" Style="{StaticResource FieldLabel}"/>
-                                                <ComboBox ItemsSource="{Binding AvailableSeasons}"
-                                                          SelectedItem="{Binding SelectedSeason}"
-                                                          Style="{StaticResource ModernComboBox}"
-                                                          ItemContainerStyle="{StaticResource ModernComboBoxItem}"
-                                                          DisplayMemberPath="DisplayLine"
-                                                          ToolTip="Click 🔄 Load Seasons to populate from Crunchyroll"/>
-                                            </StackPanel>
-                                            <Button Grid.Column="1"
-                                                    Content="🔄 Load Seasons"
-                                                    Command="{Binding DataContext.LoadCrdSeasonsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    Style="{StaticResource SecondaryButton}"
-                                                    VerticalAlignment="Bottom"
-                                                    ToolTip="Fetch the season list from Crunchyroll for the current Series ID"/>
-                                        </Grid>
-
                                         <!-- CRD Output Folder -->
                                         <TextBlock Text="CRD Output Folder" Style="{StaticResource FieldLabel}"/>
                                         <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4" TextWrapping="Wrap">
-                                            The folder where CRD saves downloaded episodes for this show. JEM watches this folder on the release schedule.
+                                            The folder where CRD saves downloaded episodes for this show.
+                                            JEM watches this folder on the release schedule and picks up new files automatically.
                                         </TextBlock>
                                         <TextBox Text="{Binding CrdOutputPath, UpdateSourceTrigger=PropertyChanged}"
                                                  Style="{StaticResource ModernTextBox}"
@@ -317,13 +262,17 @@
                                         </TextBlock>
                                         <TextBox Text="{Binding CrdFilePattern, UpdateSourceTrigger=PropertyChanged}"
                                                  Style="{StaticResource ModernTextBox}"
-                                                 FontFamily="Consolas"/>
+                                                 FontFamily="Consolas"
+                                                 Margin="0,0,0,12"/>
 
-                                        <!-- Polling schedule note -->
-                                        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="6" Padding="12,8" Margin="0,12,0,0">
+                                        <!-- How it works note -->
+                                        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="6" Padding="12,8">
                                             <TextBlock FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}">
-                                                <Run Text="⏱ CRD polling schedule:" FontWeight="SemiBold"/>
-                                                <Run Text=" Every 1 min for 10 min · Every 10 min for 1 hr · Every 30 min for 6 hrs · then stop until next airing."/>
+                                                <Run Text="⚙ How it works:" FontWeight="SemiBold"/>
+                                                <Run Text=" When a new episode file appears in the output folder, JEM moves it to the Encoding folder and starts encoding automatically."/>
+                                                <LineBreak/>
+                                                <Run Text="⏱ Check schedule:" FontWeight="SemiBold"/>
+                                                <Run Text=" Every 1 min for 10 min → every 10 min for 1 hr → every 30 min for 6 hrs → stop until next airing."/>
                                             </TextBlock>
                                         </Border>
                                     </StackPanel>
@@ -685,60 +634,7 @@
 
                                 <CheckBox Content="Run CRD's built-in updater automatically on startup"
                                           IsChecked="{Binding CRDAutoUpdate}"
-                                          Style="{StaticResource ModernCheckBox}"
-                                          Margin="0,0,0,4"/>
-                                <CheckBox Content="Auto-launch CRD when a show's release window opens (prompts you to download)"
-                                          IsChecked="{Binding CRDAutoLaunchOnRelease}"
                                           Style="{StaticResource ModernCheckBox}"/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- Crunchyroll API Configuration -->
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock Text="🌐 Crunchyroll API" Style="{StaticResource SectionHeader}"/>
-                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"
-                                           Foreground="{StaticResource TextSecondaryBrush}">
-                                    Sign in to search for series by name and load season lists directly in JEM.
-                                    Your credentials are used only to obtain a short-lived Bearer token — they are never sent anywhere other than Crunchyroll's own API.
-                                </TextBlock>
-
-                                <Grid Margin="0,0,0,8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                        <TextBlock Text="Email" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox Text="{Binding CrunchyrollEmail, UpdateSourceTrigger=PropertyChanged}"
-                                                 Style="{StaticResource ModernTextBox}"
-                                                 ToolTip="Crunchyroll account email"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                        <TextBlock Text="Password" Style="{StaticResource FieldLabel}"/>
-                                        <PasswordBox x:Name="CrunchyrollPasswordBox"
-                                                     Style="{StaticResource ModernPasswordBox}"
-                                                     ToolTip="Crunchyroll account password"/>
-                                    </StackPanel>
-                                </Grid>
-
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0"
-                                               Text="{Binding CrunchyrollAuthStatus}"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               FontSize="12"
-                                               VerticalAlignment="Center"/>
-                                    <Button Grid.Column="1"
-                                            Content="🔑 Sign In"
-                                            Style="{StaticResource ModernButton}"
-                                            Width="100"
-                                            Click="CrunchyrollSignIn_Click"
-                                            ToolTip="Authenticate with Crunchyroll to enable series search"/>
-                                </Grid>
                             </StackPanel>
                         </Border>
 
@@ -1484,7 +1380,7 @@
                                 <TextBlock TextWrapping="Wrap" FontSize="11"
                                            Foreground="{StaticResource TextSecondaryBrush}">
                                     <Run Text="Crunchy-DL (CRD)" FontWeight="SemiBold"/>
-                                    <Run Text=" is the primary download source. Configure your shows in the Weekly Shows tab by selecting CRD as the download method and setting the Crunchyroll series ID and output folder."/>
+                                    <Run Text=" is the primary download source. Configure your shows in the Weekly Shows tab by selecting CRD as the download method and pointing it at the output folder. JEM detects new downloads automatically and starts encoding."/>
                                 </TextBlock>
                                 <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"
                                            Foreground="{StaticResource TextSecondaryBrush}">

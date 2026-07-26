@@ -30,7 +30,6 @@ namespace JudasEncodingManager
             Resources.Add("QueueStatusColorConverter", new QueueStatusColorConverter());
             Resources.Add("LogLevelColorConverter", new LogLevelColorConverter());
             Resources.Add("EncodingStatusToVisibilityConverter", new EncodingStatusToVisibilityConverter());
-            Resources.Add("BoolToSearchLabelConverter", new BoolToSearchLabelConverter());
 
             InitializeComponent();
 
@@ -45,7 +44,6 @@ namespace JudasEncodingManager
             {
                 _viewModel.QBitRefreshRequested += OnQBitRefreshRequested;
                 _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-                _viewModel.OpenCrunchyrollSearchRequested += OnOpenCrunchyrollSearchRequested;
             }
 
             // Initialize WebView2 controls
@@ -198,40 +196,12 @@ namespace JudasEncodingManager
             }
         }
 
-        // ── Crunchyroll sign-in: transfer PasswordBox value to VM ───────────
-
-        private void CrunchyrollSignIn_Click(object sender, System.Windows.RoutedEventArgs e)
-        {
-            if (_viewModel == null) return;
-            // Transfer PasswordBox value (WPF PasswordBox doesn't support binding)
-            _viewModel.CrunchyrollPassword = CrunchyrollPasswordBox.Password;
-            // Now invoke the command, which calls AuthenticateAsync with the updated password
-            if (_viewModel.CrunchyrollSignInCommand.CanExecute(null))
-                _viewModel.CrunchyrollSignInCommand.Execute(null);
-        }
-
-        // ── Crunchyroll search dialog ────────────────────────────────────────
-
-        private void OnOpenCrunchyrollSearchRequested(object? sender, EventArgs e)
-        {
-            if (_viewModel == null) return;
-
-            var vm     = new CrunchyrollSearchViewModel(_viewModel.CrunchyrollApi);
-            var dialog = new CrunchyrollSearchWindow(vm) { Owner = this };
-
-            if (dialog.ShowDialog() == true && vm.SelectedSeries != null)
-            {
-                _viewModel.ApplyCrunchyrollSeries(vm.SelectedSeries);
-            }
-        }
-
         protected override void OnClosed(EventArgs e)
         {
             if (_viewModel != null)
             {
                 _viewModel.QBitRefreshRequested -= OnQBitRefreshRequested;
                 _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
-                _viewModel.OpenCrunchyrollSearchRequested -= OnOpenCrunchyrollSearchRequested;
             }
             
             LocalQBitWebView?.Dispose();

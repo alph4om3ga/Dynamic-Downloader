@@ -23,8 +23,6 @@ namespace JudasEncodingManager.ViewModels
     {
         public event PropertyChangedEventHandler? PropertyChanged;
         public event EventHandler? QBitRefreshRequested;
-        /// <summary>Raised when the Crunchyroll series search dialog should be opened.</summary>
-        public event EventHandler? OpenCrunchyrollSearchRequested;
 
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)
         {
@@ -74,14 +72,6 @@ namespace JudasEncodingManager.ViewModels
 
         // CRD
         private CRDViewModel? _crdViewModel;
-
-        // Crunchyroll API
-        private readonly CrunchyrollApiService _crunchyrollApi = new();
-        private string _crunchyrollAuthStatus = "";
-        private bool   _isLoadingCrdSeasons;
-        private AsyncRelayCommand? _crunchyrollSignInCommand;
-        private AsyncRelayCommand? _loadCrdSeasonsCommand;
-        private RelayCommand?      _openCrunchyrollSearchCommand;
 
         public MainViewModel()
         {
@@ -149,15 +139,6 @@ namespace JudasEncodingManager.ViewModels
             BrowseCRDPathCommand = new RelayCommand(() => BrowseFolder(s => CRDPath = s, CRDPath));
             _crdViewModel = new CRDViewModel(() => _settings);
 
-            // Crunchyroll API commands
-            _crunchyrollSignInCommand = new AsyncRelayCommand(CrunchyrollSignInAsync);
-            _loadCrdSeasonsCommand = new AsyncRelayCommand(
-                LoadCrdSeasonsAsync,
-                () => SelectedShow?.UsesCRD == true && !_isLoadingCrdSeasons);
-            _openCrunchyrollSearchCommand = new RelayCommand(
-                () => OpenCrunchyrollSearchRequested?.Invoke(this, EventArgs.Empty),
-                () => SelectedShow?.UsesCRD == true);
-
             // Set default color scheme
             _selectedColorScheme = ColorSchemes.FirstOrDefault(c => c.Name == "Dark Blue") ?? ColorSchemes.First();
 
@@ -192,8 +173,6 @@ namespace JudasEncodingManager.ViewModels
             _testRssFeedCommand?.NotifyCanExecuteChanged();
             _removeTrackerCommand?.NotifyCanExecuteChanged();
             _duplicateTrackerCommand?.NotifyCanExecuteChanged();
-            _loadCrdSeasonsCommand?.NotifyCanExecuteChanged();
-            _openCrunchyrollSearchCommand?.NotifyCanExecuteChanged();
         }
 
         // ==================== COLLECTIONS ====================
@@ -264,44 +243,6 @@ namespace JudasEncodingManager.ViewModels
 
         /// <summary>Exposes the CRD management view-model for the CRD tab.</summary>
         public CRDViewModel CRDViewModel => _crdViewModel!;
-
-        // ==================== CRUNCHYROLL COMMANDS / PROPERTIES ====================
-
-        public ICommand CrunchyrollSignInCommand      => _crunchyrollSignInCommand!;
-        public ICommand LoadCrdSeasonsCommand          => _loadCrdSeasonsCommand!;
-        public ICommand OpenCrunchyrollSearchCommand   => _openCrunchyrollSearchCommand!;
-
-        /// <summary>Exposes the API service so the code-behind can pass it to the search dialog VM.</summary>
-        public CrunchyrollApiService CrunchyrollApi => _crunchyrollApi;
-
-        public string CrunchyrollEmail
-        {
-            get => _settings.Crunchyroll.Email;
-            set { _settings.Crunchyroll.Email = value; OnPropertyChanged(); HasUnsavedChanges = true; }
-        }
-
-        public string CrunchyrollPassword
-        {
-            get => _settings.Crunchyroll.Password;
-            set { _settings.Crunchyroll.Password = value; OnPropertyChanged(); HasUnsavedChanges = true; }
-        }
-
-        public string CrunchyrollAuthStatus
-        {
-            get => _crunchyrollAuthStatus;
-            set { _crunchyrollAuthStatus = value; OnPropertyChanged(); }
-        }
-
-        public bool IsLoadingCrdSeasons
-        {
-            get => _isLoadingCrdSeasons;
-            set
-            {
-                _isLoadingCrdSeasons = value;
-                OnPropertyChanged();
-                _loadCrdSeasonsCommand?.NotifyCanExecuteChanged();
-            }
-        }
 
         // ==================== BASIC PROPERTIES ====================
 
@@ -734,12 +675,6 @@ namespace JudasEncodingManager.ViewModels
             set { _settings.CRD.AutoUpdate = value; OnPropertyChanged(); HasUnsavedChanges = true; }
         }
 
-        public bool CRDAutoLaunchOnRelease
-        {
-            get => _settings.CRD.AutoLaunchOnRelease;
-            set { _settings.CRD.AutoLaunchOnRelease = value; OnPropertyChanged(); HasUnsavedChanges = true; }
-        }
-
         // ==================== FILE METHODS ====================
 
         private void OpenFile()
@@ -914,9 +849,6 @@ namespace JudasEncodingManager.ViewModels
             OnPropertyChanged(nameof(IsQBitUrlEmpty));
             OnPropertyChanged(nameof(CRDPath));
             OnPropertyChanged(nameof(CRDAutoUpdate));
-            OnPropertyChanged(nameof(CRDAutoLaunchOnRelease));
-            OnPropertyChanged(nameof(CrunchyrollEmail));
-            OnPropertyChanged(nameof(CrunchyrollPassword));
         }
 
         // ==================== SHOW METHODS ====================
@@ -1352,57 +1284,6 @@ namespace JudasEncodingManager.ViewModels
             {
                 MessageBox.Show($"Failed to clear temp folder: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-
-        // ==================== CRUNCHYROLL METHODS ====================
-
-        private async Task CrunchyrollSignInAsync()
-        {
-            CrunchyrollAuthStatus = "Signing in…";
-            var (ok, error) = await _crunchyrollApi.AuthenticateAsync(CrunchyrollEmail, CrunchyrollPassword).ConfigureAwait(false);
-            CrunchyrollAuthStatus = ok ? "✅ Signed in" : $"❌ {error}";
-        }
-
-        private async Task LoadCrdSeasonsAsync()
-        {
-            if (SelectedShow == null || !SelectedShow.UsesCRD) return;
-            if (string.IsNullOrWhiteSpace(SelectedShow.CrdShowId))
-            {
-                CrunchyrollAuthStatus = "⚠ Enter a Series ID first.";
-                return;
-            }
-
-            IsLoadingCrdSeasons = true;
-            CrunchyrollAuthStatus = "Loading seasons…";
-
-            var (seasons, error) = await _crunchyrollApi.GetSeasonsAsync(SelectedShow.CrdShowId).ConfigureAwait(false);
-
-            if (!string.IsNullOrEmpty(error))
-            {
-                CrunchyrollAuthStatus = $"❌ {error}";
-            }
-            else
-            {
-                SelectedShow.SetAvailableSeasons(seasons);
-                CrunchyrollAuthStatus = $"✅ Loaded {seasons.Count} season(s)";
-            }
-
-            IsLoadingCrdSeasons = false;
-        }
-
-        /// <summary>
-        /// Called by the code-behind after the search dialog closes with a result.
-        /// Applies the series to the currently selected show and auto-loads its seasons.
-        /// </summary>
-        public void ApplyCrunchyrollSeries(CrunchyrollSeries series)
-        {
-            if (SelectedShow == null) return;
-            SelectedShow.CrdShowId    = series.Id;
-            SelectedShow.CrdShowTitle = series.Title;
-            HasUnsavedChanges = true;
-
-            // Kick off season loading
-            _ = LoadCrdSeasonsAsync();
         }
 
         private void CleanOldLogs()
