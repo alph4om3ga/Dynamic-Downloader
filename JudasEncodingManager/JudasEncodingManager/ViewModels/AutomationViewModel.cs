@@ -138,6 +138,9 @@ namespace JudasEncodingManager.ViewModels
         private CancellationTokenSource? _currentProcessCts;
         private CancellationTokenSource? _testRunCts;
         
+        // Logging
+        private string _logsFolder = @"C:\JudasEncodingManager\Logs";
+
         // Test run state
         private bool _isSimulatedTest = true;
         private bool _isQuickEncode = true;  // true = 5-min test, false = full encode
@@ -253,6 +256,8 @@ namespace JudasEncodingManager.ViewModels
             _crdService = new CRDService();
             _crdService.Configure(settings.CRD.Path);
             _crdService.LogMessage += (_, msg) => AddLogEntry(msg, ActivityLogLevel.Info);
+
+            _logsFolder = settings.LogsFolder;
 
             AddLogEntry("Services initialized", ActivityLogLevel.Info);
         }
@@ -718,7 +723,10 @@ namespace JudasEncodingManager.ViewModels
 
             InitializeServices();
 
-            // Initialize monitoring states for all active shows
+            // Initialize monitoring states for all active shows.
+            // On restart, preserve FoundThisWeek (avoid re-processing) but clear
+            // NextScheduledCheck so shows are evaluated immediately rather than
+            // waiting out the stale interval from the previous session.
             foreach (var show in _shows.Where(s => s.IsActive))
             {
                 var showId = show.Model.OutputFileTitle ?? show.OutputTorrentTitle;
@@ -729,6 +737,13 @@ namespace JudasEncodingManager.ViewModels
                         ShowId = showId,
                         Method = show.DownloadMethod
                     };
+                }
+                else
+                {
+                    // Clear stale timing so the loop checks immediately on restart
+                    var existing = _monitoringStates[showId];
+                    existing.NextScheduledCheck = null;
+                    existing.LastCheckTime = null;
                 }
             }
 
@@ -2439,11 +2454,13 @@ Encoded by: Judas Team
 
         private void AddLogEntry(string message, ActivityLogLevel level)
         {
+            var timestamp = DateTime.Now;
+
             Application.Current.Dispatcher.Invoke(() =>
             {
                 ActivityLog.Insert(0, new ActivityLogEntry
                 {
-                    Timestamp = DateTime.Now,
+                    Timestamp = timestamp,
                     Message = message,
                     Level = level
                 });
@@ -2453,6 +2470,19 @@ Encoded by: Judas Team
                 {
                     ActivityLog.RemoveAt(ActivityLog.Count - 1);
                 }
+            });
+
+            // Append to daily log file — fire-and-forget, never crashes the app
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(_logsFolder);
+                    var logFile = Path.Combine(_logsFolder, $"jem-{timestamp:yyyy-MM-dd}.log");
+                    var line = $"[{timestamp:HH:mm:ss}] [{level,-7}] {message}{Environment.NewLine}";
+                    File.AppendAllText(logFile, line);
+                }
+                catch { /* never let file I/O break the app */ }
             });
         }
 
