@@ -1410,10 +1410,7 @@ namespace JudasEncodingManager.ViewModels
                 item.StatusMessage = "Uploading to seedbox...";
                 AddLogEntry("📤 Uploading to seedbox...", ActivityLogLevel.Info);
 
-                var showFolder   = !string.IsNullOrEmpty(item.Show.OutputTorrentTitle)
-                                     ? item.Show.OutputTorrentTitle
-                                     : item.Show.OutputFileTitle;
-                var uploadResult = await _ftpService!.UploadEpisodeAsync(item.MuxedFilePath, showFolder, Path.GetFileName(item.MuxedFilePath), cancellationToken);
+                var uploadResult = await _ftpService!.UploadEpisodeAsync(item.MuxedFilePath, Path.GetFileName(item.MuxedFilePath), cancellationToken);
                 if (!uploadResult.Success)
                     throw new Exception($"Failed to upload file to seedbox: {uploadResult.ErrorMessage}");
 
@@ -1422,6 +1419,20 @@ namespace JudasEncodingManager.ViewModels
                     AddLogEntry($"⚠️ Torrent file upload failed: {torrentUploadResult.ErrorMessage}", ActivityLogLevel.Warning);
 
                 AddLogEntry("✅ Uploaded to seedbox", ActivityLogLevel.Success);
+
+                // Add torrent to seedbox qBittorrent
+                if (File.Exists(item.TorrentFilePath))
+                {
+                    AddLogEntry("Adding torrent to seedbox qBittorrent...", ActivityLogLevel.Info);
+                    var seedboxAdded = await _qbitService!.AddTorrentFileAsync(
+                        item.TorrentFilePath,
+                        settings.QBittorrent.SeedboxReleasesPath,
+                        isLocal: false);
+                    AddLogEntry(seedboxAdded
+                        ? "✅ Torrent added to seedbox qBittorrent"
+                        : "⚠️ Failed to add torrent to seedbox qBittorrent — add it manually",
+                        seedboxAdded ? ActivityLogLevel.Success : ActivityLogLevel.Warning);
+                }
 
                 // ==================== STAGE 10: Post to Nyaa ====================
                 item.Status = QueueItemStatus.PostingToNyaa;
@@ -2348,8 +2359,7 @@ Encoded by: Judas Team
                 TestRunStatus = "Uploading to seedbox...";
                 AddLogEntry($"📤 Uploading to seedbox...", ActivityLogLevel.Info);
 
-                var showFolder = show.Model.OutputTorrentTitle ?? show.DisplayName;
-                var uploadResult = await _ftpService!.UploadEpisodeAsync(queueItem.MuxedFilePath, showFolder, Path.GetFileName(queueItem.MuxedFilePath), ct);
+                var uploadResult = await _ftpService!.UploadEpisodeAsync(queueItem.MuxedFilePath, Path.GetFileName(queueItem.MuxedFilePath), ct);
                 if (!uploadResult.Success)
                 {
                     throw new Exception($"Failed to upload file to seedbox: {uploadResult.ErrorMessage}");
@@ -2362,6 +2372,21 @@ Encoded by: Judas Team
                     AddLogEntry($"⚠️ Failed to upload torrent file: {torrentUploadResult.ErrorMessage}", ActivityLogLevel.Warning);
                 }
                 AddLogEntry($"✅ Uploaded to seedbox", ActivityLogLevel.Success);
+
+                // Add torrent to seedbox qBittorrent
+                if (File.Exists(queueItem.TorrentFilePath))
+                {
+                    AddLogEntry("Adding torrent to seedbox qBittorrent...", ActivityLogLevel.Info);
+                    var settings2 = _getSettings();
+                    var seedboxAdded = await _qbitService!.AddTorrentFileAsync(
+                        queueItem.TorrentFilePath,
+                        settings2.QBittorrent.SeedboxReleasesPath,
+                        isLocal: false);
+                    AddLogEntry(seedboxAdded
+                        ? "✅ Torrent added to seedbox qBittorrent"
+                        : "⚠️ Failed to add torrent to seedbox qBittorrent — add it manually",
+                        seedboxAdded ? ActivityLogLevel.Success : ActivityLogLevel.Warning);
+                }
                 TestRunProgress = 97;
 
                 // ==================== STAGE 10: Post to Nyaa ====================

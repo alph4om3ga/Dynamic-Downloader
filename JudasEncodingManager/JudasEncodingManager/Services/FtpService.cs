@@ -83,9 +83,9 @@ namespace JudasEncodingManager.Services
             return await UploadWithRetryAsync(localPath, remotePath, 3, cancellationToken);
         }
 
-        public async Task<FtpUploadResult> UploadEpisodeAsync(string localPath, string showFolder, string remoteFileName, CancellationToken cancellationToken)
+        public async Task<FtpUploadResult> UploadEpisodeAsync(string localPath, string remoteFileName, CancellationToken cancellationToken)
         {
-            var remotePath = $"{_releasesPath}{showFolder}/{remoteFileName}";
+            var remotePath = $"{_releasesPath}{remoteFileName}";
             return await UploadWithRetryAsync(localPath, remotePath, 5, cancellationToken);
         }
 

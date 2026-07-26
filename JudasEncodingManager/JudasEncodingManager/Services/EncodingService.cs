@@ -29,15 +29,6 @@ namespace JudasEncodingManager.Services
 
             try
             {
-                var showConfigPath = Path.Combine(EncodingScriptsPath, item.Show.IniScriptName);
-                
-                if (!File.Exists(showConfigPath))
-                {
-                    result.Success = false;
-                    result.ErrorMessage = $"INI file not found: {showConfigPath}";
-                    return result;
-                }
-
                 if (!File.Exists(item.SourceFilePath))
                 {
                     result.Success = false;
@@ -55,13 +46,21 @@ namespace JudasEncodingManager.Services
                     Directory.CreateDirectory(OutputPath);
                 }
 
-                // For test runs, we'll encode directly with ffmpeg/x265 for just 5 minutes
+                // Test runs use ffmpeg directly — no INI script needed
                 if (item.IsTestRun)
                 {
                     result = await EncodeTestRunAsync(item, outputFilePath, cancellationToken);
                 }
                 else
                 {
+                    // Full encode: verify the show's INI script exists before launching PowerShell
+                    var showConfigPath = Path.Combine(EncodingScriptsPath, item.Show.IniScriptName);
+                    if (!File.Exists(showConfigPath))
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = $"INI script not found: {showConfigPath}";
+                        return result;
+                    }
                     result = await EncodeFullAsync(item, showConfigPath, workerConfigPath, outputFilePath, cancellationToken);
                 }
             }
