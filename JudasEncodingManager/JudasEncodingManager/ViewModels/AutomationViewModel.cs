@@ -111,6 +111,7 @@ namespace JudasEncodingManager.ViewModels
         private readonly ObservableCollection<ShowViewModel> _shows;
         private readonly Dictionary<string, ShowMonitoringState> _monitoringStates = new();
         private readonly Func<AppSettings> _getSettings;
+        private readonly Action? _onSave;
         
         // Services
         private QBittorrentService? _qbitService;
@@ -148,10 +149,11 @@ namespace JudasEncodingManager.ViewModels
         private bool _isTestRunning;
         private double _testRunProgress;
 
-        public AutomationViewModel(ObservableCollection<ShowViewModel> shows, Func<AppSettings>? getSettings = null)
+        public AutomationViewModel(ObservableCollection<ShowViewModel> shows, Func<AppSettings>? getSettings = null, Action? onSave = null)
         {
             _shows = shows;
             _getSettings = getSettings ?? (() => new AppSettings());
+            _onSave = onSave;
 
             Queue = new ObservableCollection<QueueItem>();
             TestRunRssItems = new ObservableCollection<RssItem>();
@@ -1470,6 +1472,21 @@ namespace JudasEncodingManager.ViewModels
                 item.Status        = QueueItemStatus.Completed;
                 item.StatusMessage = "Released!";
                 item.CompletedAt   = DateTime.Now;
+
+                // Record the episode in the show's history and persist to disk
+                var showId = item.Show.OutputFileTitle ?? item.Show.OutputTorrentTitle;
+                var showVm = _shows.FirstOrDefault(s =>
+                    (s.Model.OutputFileTitle ?? s.OutputTorrentTitle) == showId);
+                if (showVm != null)
+                {
+                    Application.Current.Dispatcher.Invoke(() =>
+                        showVm.AddEpisode(
+                            item.EpisodeNumber,
+                            item.Version,
+                            Path.GetFileName(item.SourceFilePath ?? ""),
+                            Path.GetFileName(item.MuxedFilePath ?? item.OutputFileName)));
+                    _onSave?.Invoke();
+                }
 
                 var duration = item.CompletedAt.Value - item.StartedAt!.Value;
                 AddLogEntry($"✅ COMPLETED: {item.OutputFileName} in {duration.TotalMinutes:F1} min", ActivityLogLevel.Success);

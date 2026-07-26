@@ -82,7 +82,8 @@ namespace JudasEncodingManager.ViewModels
             ColorSchemes = new ObservableCollection<ColorSchemeDefinition>(ColorSchemeDefinition.GetPresetSchemes());
 
             // Initialize automation (must be after Shows is created)
-            Automation = new AutomationViewModel(Shows, () => _settings);
+            Automation = new AutomationViewModel(Shows, () => _settings,
+                () => { if (!string.IsNullOrEmpty(_currentFilePath)) SaveSettingsToFile(_currentFilePath); });
 
             // File commands
             OpenFileCommand = new RelayCommand(OpenFile);
