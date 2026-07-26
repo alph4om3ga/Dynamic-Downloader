@@ -207,6 +207,7 @@ namespace JudasEncodingManager.Models
         
         // Torrent info
         public string TorrentHash { get; set; } = "";
+        public string TorrentLink { get; set; } = "";   // Magnet / .torrent URL (RSS source only)
         public string NyaaUrl { get; set; } = "";
         
         // Progress

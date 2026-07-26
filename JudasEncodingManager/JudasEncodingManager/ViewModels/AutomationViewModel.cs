@@ -897,12 +897,13 @@ namespace JudasEncodingManager.ViewModels
 
             var queueItem = new QueueItem
             {
-                Show          = show.Model,
-                EpisodeNumber = nextEp,
-                Version       = 1,
-                Status        = QueueItemStatus.Pending,
-                StatusMessage = "Queued from CRD output",
+                Show           = show.Model,
+                EpisodeNumber  = nextEp,
+                Version        = 1,
+                Status         = QueueItemStatus.Pending,
+                StatusMessage  = "Queued from CRD output",
                 SourceFileName = System.IO.Path.GetFileName(filePath),
+                SourceFilePath = filePath,
                 DownloadSource = DownloadSource.CRD
             };
 
@@ -956,13 +957,15 @@ namespace JudasEncodingManager.ViewModels
                     
                     var queueItem = new QueueItem
                     {
-                        Show = show.Model,
-                        EpisodeNumber = episodeNumber.Value,
-                        Version = version,
-                        Status = QueueItemStatus.Pending,
-                        StatusMessage = "Queued from RSS",
-                        TorrentHash = infoHash,
-                        SourceFileName = title
+                        Show           = show.Model,
+                        EpisodeNumber  = episodeNumber.Value,
+                        Version        = version,
+                        Status         = QueueItemStatus.Pending,
+                        StatusMessage  = "Queued from RSS",
+                        TorrentHash    = infoHash,
+                        TorrentLink    = link,
+                        SourceFileName = title,
+                        DownloadSource = DownloadSource.Rss
                     };
 
                     Application.Current.Dispatcher.Invoke(() =>
@@ -1094,133 +1097,374 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task ProcessQueueItemAsync(QueueItem item, CancellationToken cancellationToken)
         {
+            if (_qbitService == null)
+                InitializeServices();
+
+            var settings = _getSettings();
+            string description = "";
+
             try
             {
-                // Stage 1: Download
-                item.Status = QueueItemStatus.Downloading;
-                item.StatusMessage = "Downloading torrent...";
                 item.StartedAt = DateTime.Now;
-                AddLogEntry($"Downloading: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with QBittorrentService
-                await SimulateStageAsync(item, 0, 0.2, 5000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
 
-                item.Status = QueueItemStatus.DownloadComplete;
-                item.StatusMessage = "Download complete";
+                // ==================== STAGE 1: Acquire Source File ====================
+                if (item.DownloadSource == DownloadSource.CRD)
+                {
+                    // File already on disk — move it to the encoding folder
+                    if (string.IsNullOrEmpty(item.SourceFilePath) || !File.Exists(item.SourceFilePath))
+                        throw new Exception($"CRD source file not found: '{item.SourceFilePath}'");
 
-                // Stage 2: Analyze Tracks
-                item.Status = QueueItemStatus.AnalyzingTracks;
+                    item.Status        = QueueItemStatus.Downloading;
+                    item.StatusMessage = "Moving CRD file to encoding folder...";
+                    AddLogEntry($"[CRD] Source: {Path.GetFileName(item.SourceFilePath)}", ActivityLogLevel.Info);
+
+                    var encodingFolder = settings.Folders.EncodingFolder;
+                    var destPath       = Path.Combine(encodingFolder, Path.GetFileName(item.SourceFilePath));
+
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "video"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "audio-subs"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "data"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "done"));
+
+                    if (!string.Equals(Path.GetFullPath(item.SourceFilePath), Path.GetFullPath(destPath), StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (File.Exists(destPath)) File.Delete(destPath);
+                        AddLogEntry($"Moving to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
+                        File.Move(item.SourceFilePath, destPath);
+                        item.SourceFilePath = destPath;
+                        AddLogEntry($"✅ Moved to encoding folder", ActivityLogLevel.Success);
+                    }
+
+                    item.SourceFileSizeBytes = new FileInfo(item.SourceFilePath).Length;
+                    item.Status        = QueueItemStatus.DownloadComplete;
+                    item.StatusMessage = "CRD file ready";
+                }
+                else
+                {
+                    // RSS — download via qBittorrent
+                    item.Status        = QueueItemStatus.Downloading;
+                    item.StatusMessage = "Adding torrent to qBittorrent...";
+                    AddLogEntry($"📥 Adding torrent: {item.SourceFileName}", ActivityLogLevel.Info);
+
+                    if (string.IsNullOrEmpty(item.TorrentLink))
+                        throw new Exception("No torrent link stored for this RSS queue item — cannot download.");
+
+                    await _discordService?.SendEpisodeGrabbedAsync(item)!;
+
+                    var downloadPath = Path.Combine(settings.Folders.TempFolder, "Downloads");
+                    Directory.CreateDirectory(downloadPath);
+
+                    var torrentAdded = await _qbitService!.AddTorrentAsync(item.TorrentLink, downloadPath, isLocal: true);
+                    if (!torrentAdded)
+                        throw new Exception("Failed to add torrent to qBittorrent");
+
+                    await Task.Delay(2000, cancellationToken);
+
+                    AddLogEntry("Waiting for download to complete...", ActivityLogLevel.Info);
+                    var downloadComplete = false;
+                    var downloadTimeout  = DateTime.Now.AddMinutes(30);
+                    TorrentInfo? torrentInfo = null;
+
+                    while (!downloadComplete && DateTime.Now < downloadTimeout)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        torrentInfo = await _qbitService.GetTorrentInfoAsync(item.TorrentHash, isLocal: true);
+                        if (torrentInfo == null)
+                        {
+                            await Task.Delay(5000, cancellationToken);
+                            continue;
+                        }
+                        item.DownloadProgress = torrentInfo.Progress;
+                        item.StatusMessage    = $"Downloading... {torrentInfo.Progress:P0}";
+                        if (torrentInfo.Progress >= 1.0)
+                            downloadComplete = true;
+                        else
+                            await Task.Delay(5000, cancellationToken);
+                    }
+
+                    if (!downloadComplete || torrentInfo == null)
+                        throw new Exception("Download timed out after 30 minutes");
+
+                    await Task.Delay(2000, cancellationToken);
+
+                    // Locate video file
+                    string? videoFilePath = null;
+                    var contentPath = torrentInfo.ContentPath;
+                    if (File.Exists(contentPath))
+                    {
+                        var ext = Path.GetExtension(contentPath).ToLowerInvariant();
+                        if (ext is ".mkv" or ".mp4") videoFilePath = contentPath;
+                    }
+                    else if (Directory.Exists(contentPath))
+                    {
+                        videoFilePath = Directory.GetFiles(contentPath, "*.mkv", SearchOption.AllDirectories)
+                            .Concat(Directory.GetFiles(contentPath, "*.mp4", SearchOption.AllDirectories))
+                            .OrderByDescending(f => new FileInfo(f).Length)
+                            .FirstOrDefault();
+                    }
+                    if (string.IsNullOrEmpty(videoFilePath))
+                    {
+                        videoFilePath = Directory.GetFiles(downloadPath, "*.mkv", SearchOption.AllDirectories)
+                            .Concat(Directory.GetFiles(downloadPath, "*.mp4", SearchOption.AllDirectories))
+                            .OrderByDescending(f => new FileInfo(f).Length)
+                            .FirstOrDefault();
+                    }
+                    if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
+                        throw new Exception($"No video file found after download. Content path: {contentPath}");
+
+                    item.SourceFilePath      = videoFilePath;
+                    item.SourceFileSizeBytes = new FileInfo(videoFilePath).Length;
+                    item.SourceFileName      = Path.GetFileName(videoFilePath);
+
+                    var groupMatch = Regex.Match(item.SourceFileName, @"\[([^\]]+)\]");
+                    if (groupMatch.Success) item.SourceGroup = groupMatch.Groups[1].Value;
+
+                    AddLogEntry($"✅ Downloaded: {item.SourceFileName} ({item.SourceFileSizeFormatted})", ActivityLogLevel.Success);
+                    await _discordService?.SendDownloadCompleteAsync(item)!;
+                    await _qbitService.DeleteTorrentAsync(item.TorrentHash, deleteFiles: false, isLocal: true);
+
+                    // Move to encoding folder
+                    var encodingFolder    = settings.Folders.EncodingFolder;
+                    var encodingDestPath  = Path.Combine(encodingFolder, item.SourceFileName);
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "video"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "audio-subs"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "data"));
+                    Directory.CreateDirectory(Path.Combine(encodingFolder, "done"));
+                    if (!string.Equals(Path.GetFullPath(item.SourceFilePath), Path.GetFullPath(encodingDestPath), StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (File.Exists(encodingDestPath)) File.Delete(encodingDestPath);
+                        AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
+                        File.Move(item.SourceFilePath, encodingDestPath);
+                        item.SourceFilePath = encodingDestPath;
+                    }
+
+                    item.Status        = QueueItemStatus.DownloadComplete;
+                    item.StatusMessage = "Download complete";
+                }
+
+                // ==================== STAGE 2: Analyze Tracks ====================
+                item.Status        = QueueItemStatus.AnalyzingTracks;
                 item.StatusMessage = "Analyzing audio/subtitle tracks...";
-                AddLogEntry($"Analyzing tracks: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with MuxingService.AnalyzeSourceFile
-                await SimulateStageAsync(item, 0.2, 0.25, 2000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry($"🔍 Analyzing tracks: {Path.GetFileName(item.SourceFilePath)}", ActivityLogLevel.Info);
 
-                // Stage 3: Encode
-                item.Status = QueueItemStatus.Encoding;
-                var encodeDuration = item.IsTestRun ? "5 minutes" : "full episode";
-                item.StatusMessage = $"Encoding ({encodeDuration})...";
-                AddLogEntry($"Encoding: {item.OutputFileName} ({encodeDuration})", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with EncodingService
-                var encodeTime = item.IsTestRun ? 10000 : 30000; // Simulated
-                await SimulateStageAsync(item, 0.25, 0.7, encodeTime, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                var (audioTracks, subtitleTracks) = await _muxingService!.AnalyzeTracksAsync(item.SourceFilePath);
+                item.AudioTracks    = audioTracks;
+                item.SubtitleTracks = subtitleTracks;
+                AddLogEntry($"Found {audioTracks.Count} audio track(s), {subtitleTracks.Count} subtitle track(s)", ActivityLogLevel.Info);
 
-                item.Status = QueueItemStatus.EncodingComplete;
-                item.StatusMessage = "Encoding complete";
+                // ==================== STAGE 3: Encode ====================
+                item.Status        = QueueItemStatus.Encoding;
+                item.StatusMessage = item.IsTestRun ? "Encoding (5 minute test)..." : "Encoding full episode...";
+                AddLogEntry($"🎬 Starting {(item.IsTestRun ? "5-minute test" : "full episode")} encode...", ActivityLogLevel.Info);
 
-                // Stage 4: Mux
-                item.Status = QueueItemStatus.Muxing;
+                await _discordService?.SendEncodingStartedAsync(item, item.IsTestRun)!;
+
+                var workerConfigPath = Path.Combine(settings.Folders.EncodingFolder, "WorkerConfig.ini");
+                var encodeResult     = await _encodingService!.EncodeAsync(item, workerConfigPath, cancellationToken);
+                if (!encodeResult.Success)
+                    throw new Exception($"Encoding failed: {encodeResult.ErrorMessage}");
+
+                item.EncodedFilePath = encodeResult.OutputFilePath;
+                item.Status          = QueueItemStatus.EncodingComplete;
+                item.StatusMessage   = "Encoding complete";
+                AddLogEntry($"✅ Encoding complete: {Path.GetFileName(encodeResult.OutputFilePath)} ({encodeResult.FileSizeFormatted})", ActivityLogLevel.Success);
+                await _discordService?.SendEncodingCompleteAsync(item, encodeResult.Duration, encodeResult.FileSizeFormatted)!;
+
+                // Cleanup source + LWI files
+                AddLogEntry("🧹 Cleaning up source files...", ActivityLogLevel.Info);
+                try
+                {
+                    if (File.Exists(item.SourceFilePath))
+                    {
+                        File.Delete(item.SourceFilePath);
+                        AddLogEntry($"Deleted source: {Path.GetFileName(item.SourceFilePath)}", ActivityLogLevel.Info);
+                    }
+                    foreach (var lwi in Directory.GetFiles(settings.Folders.EncodingFolder, "*.lwi", SearchOption.TopDirectoryOnly))
+                    {
+                        File.Delete(lwi);
+                        AddLogEntry($"Deleted LWI: {Path.GetFileName(lwi)}", ActivityLogLevel.Info);
+                    }
+                }
+                catch (Exception ex) { AddLogEntry($"⚠️ Cleanup warning: {ex.Message}", ActivityLogLevel.Warning); }
+
+                // ==================== STAGE 4: Mux ====================
+                item.Status        = QueueItemStatus.Muxing;
                 item.StatusMessage = "Muxing final file...";
-                AddLogEntry($"Muxing: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with MuxingService
-                await SimulateStageAsync(item, 0.7, 0.75, 3000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("🔧 Muxing final file...", ActivityLogLevel.Info);
 
-                // Stage 5: Screenshots
-                item.Status = QueueItemStatus.TakingScreenshots;
+                var muxOutputPath = Path.Combine(settings.Folders.SeedingFolder, $"{item.OutputFileName}.mkv");
+                Directory.CreateDirectory(settings.Folders.SeedingFolder);
+
+                MuxingResult muxResult;
+                if (item.IsTestRun)
+                {
+                    // Quick test: ffmpeg already produced a complete file
+                    try
+                    {
+                        var normEnc = Path.GetFullPath(item.EncodedFilePath).ToLowerInvariant();
+                        var normMux = Path.GetFullPath(muxOutputPath).ToLowerInvariant();
+                        if (normEnc == normMux)
+                        {
+                            muxResult = new MuxingResult { Success = true, OutputPath = muxOutputPath, FileSize = new FileInfo(muxOutputPath).Length };
+                        }
+                        else
+                        {
+                            if (File.Exists(muxOutputPath)) File.Delete(muxOutputPath);
+                            if (Path.GetPathRoot(item.EncodedFilePath) == Path.GetPathRoot(muxOutputPath))
+                                File.Move(item.EncodedFilePath, muxOutputPath);
+                            else
+                                File.Copy(item.EncodedFilePath, muxOutputPath);
+                            muxResult = new MuxingResult { Success = true, OutputPath = muxOutputPath, FileSize = new FileInfo(muxOutputPath).Length };
+                        }
+                        AddLogEntry($"✅ Quick test mux complete: {muxResult.FileSizeFormatted}", ActivityLogLevel.Success);
+                    }
+                    catch (Exception ex)
+                    {
+                        muxResult = new MuxingResult { Success = false, ErrorMessage = ex.Message };
+                    }
+                }
+                else
+                {
+                    // Full encode: remux with proper Judas track naming
+                    AddLogEntry("Remuxing with proper track names...", ActivityLogLevel.Info);
+                    var (encAudio, encSubs) = await _muxingService!.AnalyzeTracksAsync(item.EncodedFilePath);
+                    item.AudioTracks    = encAudio;
+                    item.SubtitleTracks = encSubs;
+                    muxResult = await _muxingService.RemuxWithTrackNamesAsync(item.EncodedFilePath, muxOutputPath, item, cancellationToken);
+                    if (muxResult.Success && item.EncodedFilePath != muxOutputPath)
+                    {
+                        try { if (File.Exists(item.EncodedFilePath)) File.Delete(item.EncodedFilePath); } catch { }
+                    }
+                    if (muxResult.Success)
+                        AddLogEntry($"✅ Mux complete: {muxResult.FileSizeFormatted}", ActivityLogLevel.Success);
+                }
+
+                if (!muxResult.Success)
+                    throw new Exception($"Muxing failed: {muxResult.ErrorMessage}");
+
+                item.MuxedFilePath = muxResult.OutputPath;
+
+                // ==================== STAGE 5: Screenshots ====================
+                item.Status        = QueueItemStatus.TakingScreenshots;
                 item.StatusMessage = "Taking screenshots...";
-                AddLogEntry($"Taking screenshots: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with ScreenshotService
-                await SimulateStageAsync(item, 0.75, 0.8, 3000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("📸 Taking screenshots...", ActivityLogLevel.Info);
 
-                // Stage 6: Upload Screenshots
-                item.Status = QueueItemStatus.UploadingScreenshots;
+                var screenshotPaths = await _screenshotService!.TakeScreenshotsAsync(item.MuxedFilePath, 3);
+                item.ScreenshotPaths = screenshotPaths;
+                AddLogEntry($"✅ Captured {screenshotPaths.Count} screenshots", ActivityLogLevel.Success);
+
+                // ==================== STAGE 6: Upload Screenshots ====================
+                item.Status        = QueueItemStatus.UploadingScreenshots;
                 item.StatusMessage = "Uploading screenshots to ImgBB...";
-                AddLogEntry($"Uploading screenshots: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with ScreenshotService.UploadToImgBB
-                await SimulateStageAsync(item, 0.8, 0.85, 2000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("☁️ Uploading screenshots...", ActivityLogLevel.Info);
 
-                // Stage 7: Generate Description
-                item.Status = QueueItemStatus.GeneratingDescription;
+                var screenshotUrls = await _screenshotService.UploadScreenshotsAsync(screenshotPaths);
+                item.ScreenshotUrls = screenshotUrls;
+                AddLogEntry($"✅ Uploaded {screenshotUrls.Count} screenshots", ActivityLogLevel.Success);
+
+                // ==================== STAGE 7: Generate Description ====================
+                item.Status        = QueueItemStatus.GeneratingDescription;
                 item.StatusMessage = "Generating Nyaa description...";
-                AddLogEntry($"Generating description: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with NyaaService
-                await SimulateStageAsync(item, 0.85, 0.87, 1000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("📝 Generating description...", ActivityLogLevel.Info);
 
-                // Stage 8: Create Torrent
-                item.Status = QueueItemStatus.CreatingTorrent;
+                var templatePath    = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "NyaaDescriptionTemplate.txt");
+                var altTemplatePath = Path.Combine(settings.Folders.EncodingFolder, "NyaaDescriptionTemplate.txt");
+                string template;
+                if (File.Exists(templatePath))
+                    template = await File.ReadAllTextAsync(templatePath, cancellationToken);
+                else if (File.Exists(altTemplatePath))
+                    template = await File.ReadAllTextAsync(altTemplatePath, cancellationToken);
+                else
+                {
+                    AddLogEntry("⚠️ Template not found, using default", ActivityLogLevel.Warning);
+                    template = "**Title**: @@TITLE@@\r\nHEVC 10bit SoftSubbed - 1920 x 1080\r\nEncoded by: Judas Team\r\n**Source**: @@SOURCE@@\r\n\r\n**Audio**: @@AUDIO_TRACKS@@\r\n**Subtitles**: @@SUBS_TRACKS@@\r\n\r\n[Request an anime or get DDL links @ Discord](@@DISCORD_LINK@@)\r\n\r\n**[If you like this release please seed]**\r\n\r\n@@SCREENSHOTS@@";
+                }
+
+                var sourceGroup = string.IsNullOrEmpty(item.SourceGroup)
+                    ? (Regex.Match(item.SourceFileName, @"\[([^\]]+)\]") is { Success: true } m ? m.Groups[1].Value : "Unknown")
+                    : item.SourceGroup;
+                var sourceInfo = $"{sourceGroup} ({item.SourceFileSizeFormatted})";
+
+                description = _nyaaService!.GenerateDescription(item, template, sourceInfo);
+                var descPath = Path.Combine(settings.Folders.TempFolder, $"{item.OutputFileName}_description.txt");
+                await File.WriteAllTextAsync(descPath, description, cancellationToken);
+                item.DescriptionFilePath = descPath;
+                AddLogEntry($"✅ Description generated ({description.Length} chars)", ActivityLogLevel.Success);
+
+                // ==================== STAGE 8: Create Torrent ====================
+                item.Status        = QueueItemStatus.CreatingTorrent;
                 item.StatusMessage = "Creating torrent file...";
-                AddLogEntry($"Creating torrent: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with TorrentService
-                await SimulateStageAsync(item, 0.87, 0.9, 2000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("🧲 Creating torrent...", ActivityLogLevel.Info);
 
-                // Stage 9: Upload to Server
-                item.Status = QueueItemStatus.UploadingEpisode;
+                var torrentPath   = Path.Combine(settings.Folders.TempFolder, $"{item.OutputFileName}.torrent");
+                var torrentResult = await _torrentService!.CreateTorrentAsync(item.MuxedFilePath, torrentPath, $"Encoded by Judas - {settings.Discord.ServerInviteLink}");
+                if (!torrentResult.Success)
+                    throw new Exception($"Torrent creation failed: {torrentResult.ErrorMessage}");
+
+                item.TorrentFilePath = torrentPath;
+                item.TorrentHash     = torrentResult.InfoHash;
+                AddLogEntry($"✅ Torrent created: {torrentResult.InfoHash}", ActivityLogLevel.Success);
+
+                // ==================== STAGE 9: Upload to Server ====================
+                item.Status        = QueueItemStatus.UploadingEpisode;
                 item.StatusMessage = "Uploading to seedbox...";
-                AddLogEntry($"Uploading to seedbox: {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with FtpService
-                await SimulateStageAsync(item, 0.9, 0.95, 5000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                AddLogEntry("📤 Uploading to seedbox...", ActivityLogLevel.Info);
 
-                // Stage 10: Post to Nyaa
+                var showFolder   = !string.IsNullOrEmpty(item.Show.OutputTorrentTitle)
+                                     ? item.Show.OutputTorrentTitle
+                                     : item.Show.OutputFileTitle;
+                var uploadResult = await _ftpService!.UploadEpisodeAsync(item.MuxedFilePath, showFolder, Path.GetFileName(item.MuxedFilePath), cancellationToken);
+                if (!uploadResult.Success)
+                    throw new Exception($"Failed to upload file to seedbox: {uploadResult.ErrorMessage}");
+
+                var torrentUploadResult = await _ftpService.UploadTorrentFileAsync(item.TorrentFilePath, Path.GetFileName(item.TorrentFilePath), cancellationToken);
+                if (!torrentUploadResult.Success)
+                    AddLogEntry($"⚠️ Torrent file upload failed: {torrentUploadResult.ErrorMessage}", ActivityLogLevel.Warning);
+
+                AddLogEntry("✅ Uploaded to seedbox", ActivityLogLevel.Success);
+
+                // ==================== STAGE 10: Post to Nyaa ====================
                 item.Status = QueueItemStatus.PostingToNyaa;
-                var postType = item.IsTestRun ? "HIDDEN" : "public";
-                item.StatusMessage = $"Posting to Nyaa ({postType})...";
-                AddLogEntry($"Posting to Nyaa ({postType}): {item.OutputFileName}", ActivityLogLevel.Info);
-                
-                // TODO: Integrate with NyaaService
-                await SimulateStageAsync(item, 0.95, 1.0, 2000, cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
+                var isHidden   = item.IsTestRun;   // automation = public; items marked as test = hidden
+                var visibility = isHidden ? "HIDDEN" : "public";
+                item.StatusMessage = $"Posting to Nyaa ({visibility})...";
+                AddLogEntry($"📢 Posting to Nyaa ({visibility})...", ActivityLogLevel.Info);
 
-                // Complete!
-                item.Status = QueueItemStatus.Completed;
-                item.StatusMessage = item.IsTestRun ? "Test run completed!" : "Released!";
-                item.CompletedAt = DateTime.Now;
-                
+                var nyaaResult = await _nyaaService.PostToNyaaAsync(item, item.TorrentFilePath, description, isHidden: isHidden);
+                if (!nyaaResult.Success)
+                    AddLogEntry($"⚠️ Nyaa posting failed: {nyaaResult.Message} (continuing)", ActivityLogLevel.Warning);
+                else
+                {
+                    item.NyaaUrl = nyaaResult.Url;
+                    AddLogEntry($"✅ Posted to Nyaa ({visibility}): {nyaaResult.Url}", ActivityLogLevel.Success);
+                    await _discordService?.SendNyaaPostedAsync(item, nyaaResult.Url, isHidden)!;
+                }
+
+                // ==================== COMPLETE ====================
+                item.Status        = QueueItemStatus.Completed;
+                item.StatusMessage = "Released!";
+                item.CompletedAt   = DateTime.Now;
+
                 var duration = item.CompletedAt.Value - item.StartedAt!.Value;
-                AddLogEntry($"✅ Completed: {item.OutputFileName} in {duration.TotalMinutes:F1} minutes", ActivityLogLevel.Success);
-
-                // Send Discord notification
-                // TODO: Integrate with DiscordService
-
+                AddLogEntry($"✅ COMPLETED: {item.OutputFileName} in {duration.TotalMinutes:F1} min", ActivityLogLevel.Success);
                 UpdateQueueSummary();
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException)
             {
-                item.Status = QueueItemStatus.Error;
+                item.Status        = QueueItemStatus.Error;
                 item.StatusMessage = "Cancelled";
-                AddLogEntry($"Cancelled: {item.OutputFileName}", ActivityLogLevel.Warning);
+                item.LastError     = "Processing was cancelled";
+                AddLogEntry($"⚠️ Cancelled: {item.OutputFileName}", ActivityLogLevel.Warning);
+                UpdateQueueSummary();
             }
             catch (Exception ex)
             {
-                item.Status = QueueItemStatus.Error;
-                item.StatusMessage = $"Error: {ex.Message}";
-                item.LastError = ex.ToString();
-                AddLogEntry($"Error processing {item.OutputFileName}: {ex.Message}", ActivityLogLevel.Error);
+                item.Status        = QueueItemStatus.Error;
+                item.StatusMessage = ex.Message;
+                item.LastError     = ex.ToString();
+                AddLogEntry($"❌ Failed: {item.OutputFileName} — {ex.Message}", ActivityLogLevel.Error);
+                UpdateQueueSummary();
+                throw;
             }
         }
 
@@ -1457,18 +1701,19 @@ namespace JudasEncodingManager.ViewModels
 
             var queueItem = new QueueItem
             {
-                Show              = show.Model,
-                EpisodeNumber     = episodeNumber ?? 1,
-                Version           = version,
-                Status            = QueueItemStatus.Pending,
-                StatusMessage     = "Manual release — queued",
-                IsTestRun         = false,              // full encode + public post
-                TorrentHash       = episode.InfoHash,
-                SourceFileName    = Path.GetFileName(episode.LocalFilePath.Length > 0
-                                        ? episode.LocalFilePath
-                                        : episode.Title),
-                SourceFilePath    = episode.LocalFilePath ?? "",
-                DownloadSource    = _testRunSourceIndex == 0 ? DownloadSource.CRD : DownloadSource.Rss
+                Show           = show.Model,
+                EpisodeNumber  = episodeNumber ?? 1,
+                Version        = version,
+                Status         = QueueItemStatus.Pending,
+                StatusMessage  = "Manual release — queued",
+                IsTestRun      = false,              // full encode + public post
+                TorrentHash    = episode.InfoHash,
+                TorrentLink    = episode.Link,
+                SourceFileName = Path.GetFileName(episode.LocalFilePath.Length > 0
+                                     ? episode.LocalFilePath
+                                     : episode.Title),
+                SourceFilePath = episode.LocalFilePath ?? "",
+                DownloadSource = _testRunSourceIndex == 0 ? DownloadSource.CRD : DownloadSource.Rss
             };
 
             Queue.Add(queueItem);   // append — respects existing queue order
