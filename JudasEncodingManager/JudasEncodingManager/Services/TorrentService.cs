@@ -110,8 +110,7 @@ namespace JudasEncodingManager.Services
 
                 var info = new Dictionary<string, object>
                 {
-                    ["private"] = 1L,
-                    ["piece length"] = 1048576L // 1MB pieces
+                    ["piece length"] = 1048576L // 1MB pieces — no "private" flag so DHT/PEX/LSD are enabled
                 };
 
                 if (File.Exists(inputPath))
