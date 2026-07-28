@@ -912,20 +912,35 @@ namespace JudasEncodingManager.ViewModels
 
         private void AddManualEpisode()
         {
-            if (SelectedShow == null || !int.TryParse(ManualEpisodeNumber, out int epNum)) return;
+            if (SelectedShow == null || !int.TryParse(ManualEpisodeNumber, out int epNum) || epNum < 1) return;
 
-            var version = SelectedShow.GetLatestVersion(epNum) + 1;
-            var release = new EpisodeRelease
+            // Build a set of episode numbers that already have at least one release logged
+            var alreadyReleased = SelectedShow.Model.EpisodesReleased
+                .Select(e => e.EpisodeNumber)
+                .ToHashSet();
+
+            // Add every episode from 1 up to the entered number that isn't recorded yet
+            var added = 0;
+            for (int ep = 1; ep <= epNum; ep++)
             {
-                EpisodeNumber = epNum,
-                Version = version,
-                ReleaseDate = DateTime.Now
-            };
+                if (alreadyReleased.Contains(ep)) continue;
 
-            SelectedShow.Model.EpisodesReleased.Add(release);
-            SelectedShow.RefreshEpisodes();
+                SelectedShow.Model.EpisodesReleased.Add(new EpisodeRelease
+                {
+                    EpisodeNumber = ep,
+                    Version = 1,
+                    ReleaseDate = DateTime.Now
+                });
+                added++;
+            }
+
+            if (added > 0)
+            {
+                SelectedShow.RefreshEpisodes();
+                HasUnsavedChanges = true;
+            }
+
             ManualEpisodeNumber = "";
-            HasUnsavedChanges = true;
         }
 
         private void RemoveLastEpisode()
