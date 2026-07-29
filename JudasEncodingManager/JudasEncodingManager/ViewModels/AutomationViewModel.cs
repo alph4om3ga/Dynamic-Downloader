@@ -1025,15 +1025,16 @@ namespace JudasEncodingManager.ViewModels
 
             if (episodeNumber == null)
             {
-                // Standard patterns for episode number
+                // Standard patterns for episode number — most-specific first so a show
+                // title containing a number (e.g. "Level 999") can't shadow the real episode.
                 var patterns = new[]
                 {
-                    @"[- _](\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",   // - 01, - 01v2, _01, etc.
-                    @"E(\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",       // E01, E01v2
-                    @"Episode\s*(\d+)",                          // Episode 1
-                    @"Ep\.?\s*(\d+)",                            // Ep 1, Ep. 1
-                    @"#(\d+)",                                   // #01
-                    @"S\d+E(\d+)",                               // S01E01
+                    @"S\d+E(\d+)",                               // S01E06  ← unambiguous, try first
+                    @"E(\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",       // E06, E06v2
+                    @"Episode\s*(\d+)",                          // Episode 6
+                    @"Ep\.?\s*(\d+)",                            // Ep 6, Ep. 6
+                    @"#(\d+)",                                   // #06
+                    @"[- _](\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",   // - 06, _06, etc. (last resort)
                 };
 
                 foreach (var pattern in patterns)
