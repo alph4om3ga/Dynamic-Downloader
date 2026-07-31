@@ -1034,6 +1034,7 @@ namespace JudasEncodingManager.ViewModels
                     @"Episode\s*(\d+)",                          // Episode 6
                     @"Ep\.?\s*(\d+)",                            // Ep 6, Ep. 6
                     @"#(\d+)",                                   // #06
+                    @" - (\d{2,3})(?:v\d)?(?:[ _\.]|$|\[)",     // " - 06" standard anime delimiter (before loose fallback)
                     @"[- _](\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",   // - 06, _06, etc. (last resort)
                 };
 
