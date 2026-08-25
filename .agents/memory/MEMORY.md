@@ -1,1 +1,2 @@
 - [Nyaa RSS source filtering](nyaa-rss-source-filtering.md) — A Nyaa RSS URL with `u=` is authoritative; only broad feeds need title-based SourceGroup filtering.
+- [qBittorrent file finalization](qbittorrent-file-finalization.md) — Never move a local download until qBittorrent explicitly confirms it is paused or stopped.

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -48,7 +49,7 @@ namespace JudasEncodingManager.Services
             _seedboxLoggedIn = false;
         }
 
-        private async Task<bool> LoginLocalAsync()
+        private async Task<bool> LoginLocalAsync(CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(_localUrl)) return false;
 
@@ -56,9 +57,13 @@ namespace JudasEncodingManager.Services
             try
             {
                 // Local qBittorrent usually doesn't require auth if accessed from localhost
-                var response = await _localClient.GetAsync($"{_localUrl}/api/v2/app/version");
+                var response = await _localClient.GetAsync($"{_localUrl}/api/v2/app/version", cancellationToken);
                 _localLoggedIn = response.IsSuccessStatusCode;
                 return _localLoggedIn;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
@@ -67,7 +72,7 @@ namespace JudasEncodingManager.Services
             }
         }
 
-        private async Task<bool> LoginSeedboxAsync()
+        private async Task<bool> LoginSeedboxAsync(CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(_seedboxUrl)) return false;
 
@@ -76,7 +81,7 @@ namespace JudasEncodingManager.Services
                 // First check if already logged in by testing an API endpoint
                 if (_seedboxLoggedIn)
                 {
-                    var testResponse = await _seedboxClient.GetAsync($"{_seedboxUrl}/api/v2/app/version");
+                    var testResponse = await _seedboxClient.GetAsync($"{_seedboxUrl}/api/v2/app/version", cancellationToken);
                     if (testResponse.IsSuccessStatusCode)
                     {
                         return true;
@@ -91,10 +96,14 @@ namespace JudasEncodingManager.Services
                     new KeyValuePair<string, string>("password", _seedboxPassword)
                 });
 
-                var response = await _seedboxClient.PostAsync($"{_seedboxUrl}/api/v2/auth/login", content);
-                var result = await response.Content.ReadAsStringAsync();
+                var response = await _seedboxClient.PostAsync($"{_seedboxUrl}/api/v2/auth/login", content, cancellationToken);
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
                 _seedboxLoggedIn = result.Contains("Ok") || response.IsSuccessStatusCode;
                 return _seedboxLoggedIn;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
@@ -157,24 +166,31 @@ namespace JudasEncodingManager.Services
             }
         }
 
-        public async Task<TorrentInfo?> GetTorrentInfoAsync(string hash, bool isLocal = true)
+        public async Task<TorrentInfo?> GetTorrentInfoAsync(
+            string hash,
+            bool isLocal = true,
+            CancellationToken cancellationToken = default)
         {
             var client = isLocal ? _localClient : _seedboxClient;
             var baseUrl = isLocal ? _localUrl : _seedboxUrl;
 
             if (isLocal)
-                await LoginLocalAsync();
+                if (!await LoginLocalAsync(cancellationToken)) return null;
             else
-                await LoginSeedboxAsync();
+                if (!await LoginSeedboxAsync(cancellationToken)) return null;
 
             try
             {
-                var response = await client.GetAsync($"{baseUrl}/api/v2/torrents/info?hashes={hash}");
+                var response = await client.GetAsync($"{baseUrl}/api/v2/torrents/info?hashes={hash}", cancellationToken);
                 if (!response.IsSuccessStatusCode) return null;
 
-                var json = await response.Content.ReadAsStringAsync();
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
                 var torrents = JsonConvert.DeserializeObject<List<TorrentInfo>>(json);
                 return torrents?.FirstOrDefault();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {
@@ -206,15 +222,58 @@ namespace JudasEncodingManager.Services
             }
         }
 
-        public async Task<bool> DeleteTorrentAsync(string hash, bool deleteFiles, bool isLocal = true)
+        /// <summary>
+        /// Stops a torrent without deleting its downloaded data. This releases
+        /// qBittorrent's file handles before another process moves the files.
+        /// </summary>
+        public async Task<bool> StopTorrentAsync(
+            string hash,
+            bool isLocal = true,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(hash)) return false;
+
+            var client = isLocal ? _localClient : _seedboxClient;
+            var baseUrl = isLocal ? _localUrl : _seedboxUrl;
+
+            if (isLocal)
+                if (!await LoginLocalAsync(cancellationToken)) return false;
+            else
+                if (!await LoginSeedboxAsync(cancellationToken)) return false;
+
+            try
+            {
+                var content = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("hashes", hash)
+                });
+
+                var response = await client.PostAsync($"{baseUrl}/api/v2/torrents/stop", content, cancellationToken);
+                return response.IsSuccessStatusCode;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<bool> DeleteTorrentAsync(
+            string hash,
+            bool deleteFiles,
+            bool isLocal = true,
+            CancellationToken cancellationToken = default)
         {
             var client = isLocal ? _localClient : _seedboxClient;
             var baseUrl = isLocal ? _localUrl : _seedboxUrl;
 
             if (isLocal)
-                await LoginLocalAsync();
+                if (!await LoginLocalAsync(cancellationToken)) return false;
             else
-                await LoginSeedboxAsync();
+                if (!await LoginSeedboxAsync(cancellationToken)) return false;
 
             try
             {
@@ -224,8 +283,12 @@ namespace JudasEncodingManager.Services
                     new KeyValuePair<string, string>("deleteFiles", deleteFiles.ToString().ToLower())
                 });
 
-                var response = await client.PostAsync($"{baseUrl}/api/v2/torrents/delete", content);
+                var response = await client.PostAsync($"{baseUrl}/api/v2/torrents/delete", content, cancellationToken);
                 return response.IsSuccessStatusCode;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch
             {

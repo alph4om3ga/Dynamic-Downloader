@@ -1578,6 +1578,14 @@
                             </ListBox>
 
                             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="⬆ Up"
+                                        Command="{Binding Automation.MoveQueueItemUpCommand}"
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                                        ToolTip="Move the selected pending item earlier in the queue"/>
+                                <Button Content="⬇ Down"
+                                        Command="{Binding Automation.MoveQueueItemDownCommand}"
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                                        ToolTip="Move the selected pending item later in the queue"/>
                                 <Button Content="🔄 Retry" 
                                         Command="{Binding Automation.RetryFailedItemCommand}"
                                         Style="{StaticResource ModernButton}" Margin="0,0,8,0"/>

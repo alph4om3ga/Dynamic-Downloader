@@ -171,6 +171,8 @@ namespace JudasEncodingManager.ViewModels
             RetryFailedItemCommand = new RelayCommand(RetryFailedItem, () => SelectedQueueItem != null && IsFailedStatus(SelectedQueueItem.Status));
             RemoveQueueItemCommand = new RelayCommand(RemoveQueueItem, () => SelectedQueueItem != null);
             ClearCompletedItemsCommand = new RelayCommand(ClearCompletedItems);
+            MoveQueueItemUpCommand = new RelayCommand(MoveSelectedQueueItemUp, CanMoveSelectedQueueItemUp);
+            MoveQueueItemDownCommand = new RelayCommand(MoveSelectedQueueItemDown, CanMoveSelectedQueueItemDown);
 
             // Test run commands
             LoadTestRunRssItemsCommand = new AsyncRelayCommand(LoadTestRunRssItemsAsync, () => TestRunSelectedShow != null);
@@ -281,6 +283,8 @@ namespace JudasEncodingManager.ViewModels
         public ICommand RetryFailedItemCommand { get; }
         public ICommand RemoveQueueItemCommand { get; }
         public ICommand ClearCompletedItemsCommand { get; }
+        public ICommand MoveQueueItemUpCommand { get; }
+        public ICommand MoveQueueItemDownCommand { get; }
         public ICommand LoadTestRunRssItemsCommand { get; }
         public ICommand StartTestRunCommand { get; }
         public ICommand CancelTestRunCommand { get; }
@@ -549,8 +553,7 @@ namespace JudasEncodingManager.ViewModels
             {
                 _selectedQueueItem = value;
                 OnPropertyChanged();
-                ((RelayCommand)RetryFailedItemCommand).NotifyCanExecuteChanged();
-                ((RelayCommand)RemoveQueueItemCommand).NotifyCanExecuteChanged();
+                NotifyQueueItemCommands();
             }
         }
 
@@ -926,8 +929,7 @@ namespace JudasEncodingManager.ViewModels
 
             Application.Current.Dispatcher.Invoke(() =>
             {
-                Queue.Insert(0, queueItem);
-                UpdateQueueSummary();
+                EnqueueItem(queueItem);
             });
 
             if (!IsProcessing)
@@ -991,8 +993,7 @@ namespace JudasEncodingManager.ViewModels
 
                     Application.Current.Dispatcher.Invoke(() =>
                     {
-                        Queue.Insert(0, queueItem);
-                        UpdateQueueSummary();
+                        EnqueueItem(queueItem);
                     });
 
                     // Start processing if not already
@@ -1139,12 +1140,222 @@ namespace JudasEncodingManager.ViewModels
                     var nextItem = Queue.FirstOrDefault(q => q.Status == QueueItemStatus.Pending);
                     if (nextItem == null) break;
 
-                    await ProcessQueueItemAsync(nextItem, _currentProcessCts.Token);
+                    try
+                    {
+                        await ProcessQueueItemAsync(nextItem, _currentProcessCts.Token);
+                    }
+                    catch (OperationCanceledException) when (_currentProcessCts.Token.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Individual items are marked failed by their pipeline. Keep
+                        // processing the remaining pending work instead of stalling
+                        // the entire queue behind one unavailable source file.
+                        AddLogEntry(
+                            $"Queue item failed and was skipped: {ex.Message}",
+                            ActivityLogLevel.Error);
+                    }
                 }
             }
             finally
             {
                 IsProcessing = false;
+            }
+        }
+
+        private async Task StopLocalTorrentAndWaitAsync(string torrentHash, CancellationToken cancellationToken)
+        {
+            if (_qbitService == null || string.IsNullOrWhiteSpace(torrentHash))
+                return;
+
+            const int maxStopAttempts = 3;
+            const int maxStateChecks = 10;
+
+            AddLogEntry("Stopping local torrent so qBittorrent releases the downloaded file...", ActivityLogLevel.Info);
+            for (var stopAttempt = 1; stopAttempt <= maxStopAttempts; stopAttempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!await _qbitService.StopTorrentAsync(
+                        torrentHash,
+                        isLocal: true,
+                        cancellationToken: cancellationToken))
+                {
+                    AddLogEntry(
+                        $"qBittorrent did not confirm the stop request ({stopAttempt}/{maxStopAttempts}).",
+                        ActivityLogLevel.Warning);
+                }
+                else
+                {
+                    for (var stateCheck = 1; stateCheck <= maxStateChecks; stateCheck++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var info = await _qbitService.GetTorrentInfoAsync(
+                            torrentHash,
+                            isLocal: true,
+                            cancellationToken: cancellationToken);
+                        if (info == null)
+                        {
+                            AddLogEntry(
+                                "qBittorrent did not return torrent state; retrying the stop request.",
+                                ActivityLogLevel.Warning);
+                            break;
+                        }
+
+                        var state = info.State ?? "";
+                        if (state.StartsWith("paused", StringComparison.OrdinalIgnoreCase) ||
+                            state.StartsWith("stopped", StringComparison.OrdinalIgnoreCase))
+                        {
+                            AddLogEntry(
+                                "Local torrent stopped; waiting briefly for qBittorrent to release its file handle.",
+                                ActivityLogLevel.Info);
+                            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                            return;
+                        }
+
+                        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                    }
+                }
+
+                if (stopAttempt < maxStopAttempts)
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+
+            throw new IOException(
+                $"Unable to confirm that qBittorrent stopped torrent {torrentHash}; the source file was not moved.");
+        }
+
+        private static string? FindDownloadedVideoFile(string contentPath, string downloadPath)
+        {
+            if (File.Exists(contentPath))
+            {
+                var extension = Path.GetExtension(contentPath).ToLowerInvariant();
+                if (extension is ".mkv" or ".mp4")
+                    return contentPath;
+            }
+
+            var searchRoots = new[] { contentPath, downloadPath }
+                .Where(Directory.Exists)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var searchRoot in searchRoots)
+            {
+                var videoFile = Directory.GetFiles(searchRoot, "*.mkv", SearchOption.AllDirectories)
+                    .Concat(Directory.GetFiles(searchRoot, "*.mp4", SearchOption.AllDirectories))
+                    .OrderByDescending(file => new FileInfo(file).Length)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(videoFile))
+                    return videoFile;
+            }
+
+            return null;
+        }
+
+        private async Task WaitForFileToBeReadyAsync(string filePath, CancellationToken cancellationToken)
+        {
+            const int maxChecks = 12;
+            long previousSize = -1;
+            var stableChecks = 0;
+            Exception? lastException = null;
+
+            for (var attempt = 1; attempt <= maxChecks; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    using var file = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
+                    var currentSize = file.Length;
+
+                    if (currentSize > 0 && currentSize == previousSize)
+                        stableChecks++;
+                    else
+                        stableChecks = 0;
+
+                    previousSize = currentSize;
+
+                    if (stableChecks >= 1)
+                        return;
+                }
+                catch (IOException ex)
+                {
+                    lastException = ex;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    lastException = ex;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+
+            throw new IOException(
+                $"The downloaded file is still in use by another process after {maxChecks} seconds: {filePath}",
+                lastException);
+        }
+
+        private async Task MoveFileWithRetryAsync(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken cancellationToken)
+        {
+            const int maxAttempts = 5;
+            Exception? lastException = null;
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    if (File.Exists(destinationPath))
+                        File.Delete(destinationPath);
+
+                    File.Move(sourcePath, destinationPath);
+                    return;
+                }
+                catch (IOException ex)
+                {
+                    lastException = ex;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    lastException = ex;
+                }
+
+                if (attempt < maxAttempts)
+                {
+                    AddLogEntry(
+                        $"Source file is still in use; retrying move ({attempt}/{maxAttempts})...",
+                        ActivityLogLevel.Warning);
+                    await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+                }
+            }
+
+            throw new IOException(
+                $"Could not move the downloaded file after {maxAttempts} attempts: {Path.GetFileName(sourcePath)}",
+                lastException);
+        }
+
+        private async Task RemoveLocalTorrentAfterMoveAsync(string torrentHash, CancellationToken cancellationToken)
+        {
+            if (_qbitService == null || string.IsNullOrWhiteSpace(torrentHash))
+                return;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!await _qbitService.DeleteTorrentAsync(
+                    torrentHash,
+                    deleteFiles: false,
+                    isLocal: true,
+                    cancellationToken: cancellationToken))
+            {
+                AddLogEntry(
+                    "⚠️ The file was moved, but qBittorrent could not remove its torrent entry. Downloaded media was kept.",
+                    ActivityLogLevel.Warning);
             }
         }
 
@@ -1221,7 +1432,10 @@ namespace JudasEncodingManager.ViewModels
                     while (!downloadComplete && DateTime.Now < downloadTimeout)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        torrentInfo = await _qbitService.GetTorrentInfoAsync(item.TorrentHash, isLocal: true);
+                        torrentInfo = await _qbitService.GetTorrentInfoAsync(
+                            item.TorrentHash,
+                            isLocal: true,
+                            cancellationToken: cancellationToken);
                         if (torrentInfo == null)
                         {
                             await Task.Delay(5000, cancellationToken);
@@ -1238,32 +1452,15 @@ namespace JudasEncodingManager.ViewModels
                     if (!downloadComplete || torrentInfo == null)
                         throw new Exception("Download timed out after 30 minutes");
 
-                    await Task.Delay(2000, cancellationToken);
+                    await StopLocalTorrentAndWaitAsync(item.TorrentHash, cancellationToken);
 
                     // Locate video file
-                    string? videoFilePath = null;
                     var contentPath = torrentInfo.ContentPath;
-                    if (File.Exists(contentPath))
-                    {
-                        var ext = Path.GetExtension(contentPath).ToLowerInvariant();
-                        if (ext is ".mkv" or ".mp4") videoFilePath = contentPath;
-                    }
-                    else if (Directory.Exists(contentPath))
-                    {
-                        videoFilePath = Directory.GetFiles(contentPath, "*.mkv", SearchOption.AllDirectories)
-                            .Concat(Directory.GetFiles(contentPath, "*.mp4", SearchOption.AllDirectories))
-                            .OrderByDescending(f => new FileInfo(f).Length)
-                            .FirstOrDefault();
-                    }
-                    if (string.IsNullOrEmpty(videoFilePath))
-                    {
-                        videoFilePath = Directory.GetFiles(downloadPath, "*.mkv", SearchOption.AllDirectories)
-                            .Concat(Directory.GetFiles(downloadPath, "*.mp4", SearchOption.AllDirectories))
-                            .OrderByDescending(f => new FileInfo(f).Length)
-                            .FirstOrDefault();
-                    }
+                    var videoFilePath = FindDownloadedVideoFile(contentPath, downloadPath);
                     if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
                         throw new Exception($"No video file found after download. Content path: {contentPath}");
+
+                    await WaitForFileToBeReadyAsync(videoFilePath, cancellationToken);
 
                     item.SourceFilePath      = videoFilePath;
                     item.SourceFileSizeBytes = new FileInfo(videoFilePath).Length;
@@ -1274,7 +1471,6 @@ namespace JudasEncodingManager.ViewModels
 
                     AddLogEntry($"✅ Downloaded: {item.SourceFileName} ({item.SourceFileSizeFormatted})", ActivityLogLevel.Success);
                     await _discordService?.SendDownloadCompleteAsync(item)!;
-                    await _qbitService.DeleteTorrentAsync(item.TorrentHash, deleteFiles: false, isLocal: true);
 
                     // Move to encoding folder
                     var encodingFolder    = settings.Folders.EncodingFolder;
@@ -1285,11 +1481,12 @@ namespace JudasEncodingManager.ViewModels
                     Directory.CreateDirectory(Path.Combine(encodingFolder, "done"));
                     if (!string.Equals(Path.GetFullPath(item.SourceFilePath), Path.GetFullPath(encodingDestPath), StringComparison.OrdinalIgnoreCase))
                     {
-                        if (File.Exists(encodingDestPath)) File.Delete(encodingDestPath);
                         AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
-                        File.Move(item.SourceFilePath, encodingDestPath);
+                        await MoveFileWithRetryAsync(item.SourceFilePath, encodingDestPath, cancellationToken);
                         item.SourceFilePath = encodingDestPath;
                     }
+
+                    await RemoveLocalTorrentAfterMoveAsync(item.TorrentHash, cancellationToken);
 
                     item.Status        = QueueItemStatus.DownloadComplete;
                     item.StatusMessage = "Download complete";
@@ -1564,6 +1761,122 @@ namespace JudasEncodingManager.ViewModels
 
         // ==================== QUEUE MANAGEMENT ====================
 
+        /// <summary>
+        /// Appends work to the end of the queue. Collection order is the order
+        /// pending items will be processed, so new releases never jump the line.
+        /// </summary>
+        private void EnqueueItem(QueueItem item)
+        {
+            item.PropertyChanged += QueueItemPropertyChanged;
+
+            var firstTerminalIndex = Queue
+                .Select((queueItem, index) => new { queueItem, index })
+                .FirstOrDefault(entry => IsTerminalQueueStatus(entry.queueItem.Status))
+                ?.index ?? -1;
+
+            if (firstTerminalIndex >= 0)
+                Queue.Insert(firstTerminalIndex, item);
+            else
+                Queue.Add(item);
+
+            UpdateQueueSummary();
+            NotifyQueueItemCommands();
+        }
+
+        private void QueueItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(QueueItem.Status) && sender is QueueItem item)
+            {
+                KeepTerminalItemsBelowWork(item);
+                UpdateQueueSummary();
+                NotifyQueueItemCommands();
+            }
+        }
+
+        private void KeepTerminalItemsBelowWork(QueueItem item)
+        {
+            var currentIndex = Queue.IndexOf(item);
+            if (currentIndex < 0)
+                return;
+
+            if (IsTerminalQueueStatus(item.Status))
+            {
+                if (currentIndex < Queue.Count - 1)
+                    Queue.Move(currentIndex, Queue.Count - 1);
+                return;
+            }
+
+            var firstTerminalIndex = Queue
+                .Select((queueItem, index) => new { queueItem, index })
+                .FirstOrDefault(entry => IsTerminalQueueStatus(entry.queueItem.Status))
+                ?.index ?? -1;
+
+            if (firstTerminalIndex >= 0 && currentIndex > firstTerminalIndex)
+                Queue.Move(currentIndex, firstTerminalIndex);
+        }
+
+        private bool CanMoveSelectedQueueItemUp()
+        {
+            return GetSelectedPendingQueuePosition() > 0;
+        }
+
+        private bool CanMoveSelectedQueueItemDown()
+        {
+            var position = GetSelectedPendingQueuePosition();
+            return position >= 0 && position < Queue.Count(item => item.Status == QueueItemStatus.Pending) - 1;
+        }
+
+        private int GetSelectedPendingQueuePosition()
+        {
+            if (SelectedQueueItem?.Status != QueueItemStatus.Pending)
+                return -1;
+
+            return Queue
+                .Where(item => item.Status == QueueItemStatus.Pending)
+                .ToList()
+                .IndexOf(SelectedQueueItem);
+        }
+
+        private void MoveSelectedQueueItemUp()
+        {
+            MoveSelectedQueueItem(-1);
+        }
+
+        private void MoveSelectedQueueItemDown()
+        {
+            MoveSelectedQueueItem(1);
+        }
+
+        /// <summary>
+        /// Reorders only pending items. Active, completed, and failed rows keep
+        /// their current display positions and cannot be moved by these controls.
+        /// </summary>
+        private void MoveSelectedQueueItem(int direction)
+        {
+            var pendingItems = Queue.Where(item => item.Status == QueueItemStatus.Pending).ToList();
+            var pendingIndex = GetSelectedPendingQueuePosition();
+            var targetPendingIndex = pendingIndex + direction;
+
+            if (pendingIndex < 0 || targetPendingIndex < 0 || targetPendingIndex >= pendingItems.Count)
+                return;
+
+            var selectedItem = SelectedQueueItem!;
+            var targetItem = pendingItems[targetPendingIndex];
+            var selectedIndex = Queue.IndexOf(selectedItem);
+            var targetIndex = Queue.IndexOf(targetItem);
+
+            if (selectedIndex < 0 || targetIndex < 0)
+                return;
+
+            Queue[selectedIndex] = targetItem;
+            Queue[targetIndex] = selectedItem;
+
+            AddLogEntry(
+                $"Queue order updated: {selectedItem.OutputFileName} moved {(direction < 0 ? "up" : "down")}.",
+                ActivityLogLevel.Info);
+            NotifyQueueItemCommands();
+        }
+
         private void RetryFailedItem()
         {
             if (SelectedQueueItem == null || !IsFailedStatus(SelectedQueueItem.Status)) return;
@@ -1585,6 +1898,7 @@ namespace JudasEncodingManager.ViewModels
             if (SelectedQueueItem == null) return;
 
             var name = SelectedQueueItem.OutputFileName;
+            SelectedQueueItem.PropertyChanged -= QueueItemPropertyChanged;
             Queue.Remove(SelectedQueueItem);
             SelectedQueueItem = null;
             AddLogEntry($"Removed from queue: {name}", ActivityLogLevel.Info);
@@ -1596,6 +1910,7 @@ namespace JudasEncodingManager.ViewModels
             var completed = Queue.Where(q => q.Status == QueueItemStatus.Completed).ToList();
             foreach (var item in completed)
             {
+                item.PropertyChanged -= QueueItemPropertyChanged;
                 Queue.Remove(item);
             }
             AddLogEntry($"Cleared {completed.Count} completed items", ActivityLogLevel.Info);
@@ -1607,6 +1922,14 @@ namespace JudasEncodingManager.ViewModels
             OnPropertyChanged(nameof(QueueSummary));
         }
 
+        private void NotifyQueueItemCommands()
+        {
+            ((RelayCommand)RetryFailedItemCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)RemoveQueueItemCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)MoveQueueItemUpCommand).NotifyCanExecuteChanged();
+            ((RelayCommand)MoveQueueItemDownCommand).NotifyCanExecuteChanged();
+        }
+
         private static bool IsFailedStatus(QueueItemStatus status)
         {
             return status == QueueItemStatus.Error ||
@@ -1614,6 +1937,11 @@ namespace JudasEncodingManager.ViewModels
                    status == QueueItemStatus.EncodingFailed ||
                    status == QueueItemStatus.MuxingFailed ||
                    status == QueueItemStatus.UploadFailed;
+        }
+
+        private static bool IsTerminalQueueStatus(QueueItemStatus status)
+        {
+            return status == QueueItemStatus.Completed || IsFailedStatus(status);
         }
 
         // ==================== TEST RUN ====================
@@ -1795,8 +2123,7 @@ namespace JudasEncodingManager.ViewModels
                 DownloadSource = _testRunSourceIndex == 0 ? DownloadSource.CRD : DownloadSource.Rss
             };
 
-            Queue.Add(queueItem);   // append — respects existing queue order
-            UpdateQueueSummary();
+            EnqueueItem(queueItem);
 
             TestRunStatus = $"✅ Ep {episodeNumber} queued for release — check the Queue panel.";
             AddLogEntry($"📋 Manual release queued: {queueItem.OutputFileName}", ActivityLogLevel.Success);
@@ -1824,8 +2151,7 @@ namespace JudasEncodingManager.ViewModels
                 SourceFileName = episode.Title
             };
 
-            Queue.Insert(0, queueItem);
-            UpdateQueueSummary();
+            EnqueueItem(queueItem);
 
             // Simulate each stage
             var stages = new[]
@@ -1904,8 +2230,7 @@ namespace JudasEncodingManager.ViewModels
                 SourceFileName = episode.Title
             };
 
-            Queue.Insert(0, queueItem);
-            UpdateQueueSummary();
+            EnqueueItem(queueItem);
             queueItem.StartedAt = DateTime.Now;
 
             // Log the run configuration
@@ -1980,7 +2305,10 @@ namespace JudasEncodingManager.ViewModels
                 {
                     ct.ThrowIfCancellationRequested();
                     
-                    torrentInfo = await _qbitService.GetTorrentInfoAsync(episode.InfoHash, isLocal: true);
+                    torrentInfo = await _qbitService.GetTorrentInfoAsync(
+                        episode.InfoHash,
+                        isLocal: true,
+                        cancellationToken: ct);
                     if (torrentInfo == null)
                     {
                         AddLogEntry($"⚠️ Torrent not found by hash, waiting...", ActivityLogLevel.Warning);
@@ -2009,55 +2337,18 @@ namespace JudasEncodingManager.ViewModels
                     throw new Exception("Download timed out after 30 minutes");
                 }
 
-                // Wait a moment for files to be fully written to disk
-                await Task.Delay(2000, ct);
+                await StopLocalTorrentAndWaitAsync(episode.InfoHash, ct);
 
                 // Use the content path from qBittorrent
-                string? videoFilePath = null;
                 var contentPath = torrentInfo.ContentPath;
-                
-                if (File.Exists(contentPath))
-                {
-                    // Content path is a single file
-                    var ext = Path.GetExtension(contentPath).ToLowerInvariant();
-                    if (ext == ".mkv" || ext == ".mp4")
-                    {
-                        videoFilePath = contentPath;
-                    }
-                }
-                else if (Directory.Exists(contentPath))
-                {
-                    // Content path is a folder - search for video files
-                    var videoFiles = Directory.GetFiles(contentPath, "*.mkv", SearchOption.AllDirectories)
-                        .Concat(Directory.GetFiles(contentPath, "*.mp4", SearchOption.AllDirectories))
-                        .OrderByDescending(f => new FileInfo(f).Length)
-                        .ToList();
-                    
-                    if (videoFiles.Count > 0)
-                    {
-                        videoFilePath = videoFiles.First();
-                    }
-                }
-
-                // Fallback: search in download path
-                if (string.IsNullOrEmpty(videoFilePath))
-                {
-                    AddLogEntry($"Content path didn't contain video, searching in: {downloadPath}", ActivityLogLevel.Warning);
-                    var downloadedFiles = Directory.GetFiles(downloadPath, "*.mkv", SearchOption.AllDirectories)
-                        .Concat(Directory.GetFiles(downloadPath, "*.mp4", SearchOption.AllDirectories))
-                        .OrderByDescending(f => new FileInfo(f).Length)
-                        .ToList();
-                    
-                    if (downloadedFiles.Count > 0)
-                    {
-                        videoFilePath = downloadedFiles.First();
-                    }
-                }
+                var videoFilePath = FindDownloadedVideoFile(contentPath, downloadPath);
 
                 if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
                 {
                     throw new Exception($"No video file found after download. Content path: {contentPath}, Download path: {downloadPath}");
                 }
+
+                await WaitForFileToBeReadyAsync(videoFilePath, ct);
 
                 queueItem.SourceFilePath = videoFilePath;
                 queueItem.SourceFileSizeBytes = new FileInfo(queueItem.SourceFilePath).Length;
@@ -2076,10 +2367,6 @@ namespace JudasEncodingManager.ViewModels
                 // Send Discord notification - Download complete
                 await _discordService?.SendDownloadCompleteAsync(queueItem)!;
                 
-                // Remove torrent from qBittorrent (keep files)
-                AddLogEntry("Removing torrent from qBittorrent...", ActivityLogLevel.Info);
-                await _qbitService.DeleteTorrentAsync(episode.InfoHash, deleteFiles: false, isLocal: true);
-                
                 // Move source file to encoding folder for the PowerShell script
                 var encodingFolder = settings.Folders.EncodingFolder;
                 var encodingSourcePath = Path.Combine(encodingFolder, sourceFileName);
@@ -2093,19 +2380,13 @@ namespace JudasEncodingManager.ViewModels
                 if (queueItem.SourceFilePath != encodingSourcePath)
                 {
                     AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
-                    
-                    // Delete existing file if present
-                    if (File.Exists(encodingSourcePath))
-                    {
-                        File.Delete(encodingSourcePath);
-                    }
-                    
-                    // Move the file
-                    File.Move(queueItem.SourceFilePath, encodingSourcePath);
+                    await MoveFileWithRetryAsync(queueItem.SourceFilePath, encodingSourcePath, ct);
                     queueItem.SourceFilePath = encodingSourcePath;
                     AddLogEntry($"Source file moved to: {encodingSourcePath}", ActivityLogLevel.Info);
                 }
-                
+
+                await RemoveLocalTorrentAfterMoveAsync(episode.InfoHash, ct);
+
                 queueItem.Status = QueueItemStatus.DownloadComplete;
                 TestRunProgress = 15;
                 } // end else (torrent download path)
