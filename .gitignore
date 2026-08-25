@@ -8,6 +8,12 @@ out-tsc
 .expo
 .expo-shared
 
+# .NET build output
+**/bin/
+**/obj/
+*.user
+*.suo
+
 # dependencies
 node_modules
 
