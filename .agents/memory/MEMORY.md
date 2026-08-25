@@ -1,0 +1,1 @@
+- [Nyaa RSS source filtering](nyaa-rss-source-filtering.md) — A Nyaa RSS URL with `u=` is authoritative; only broad feeds need title-based SourceGroup filtering.
