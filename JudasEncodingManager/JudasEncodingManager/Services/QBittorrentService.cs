@@ -261,12 +261,30 @@ namespace JudasEncodingManager.Services
             }
         }
 
+        /// <summary>
+        /// qBittorrent reports a stopped download as pausedDL/pausedUP. Some
+        /// older or compatible WebUI versions report stoppedDL/stoppedUP, so
+        /// keep those values accepted as well. A successful /stop response
+        /// alone is not enough to prove that the file handle was released.
+        /// </summary>
+        public static bool IsTorrentStoppedState(string? state)
+        {
+            return state is not null &&
+                   (state.Equals("pausedDL", StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals("pausedUP", StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals("stoppedDL", StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals("stoppedUP", StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals("stopped", StringComparison.OrdinalIgnoreCase));
+        }
+
         public async Task<bool> DeleteTorrentAsync(
             string hash,
             bool deleteFiles,
             bool isLocal = true,
             CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(hash)) return false;
+
             var client = isLocal ? _localClient : _seedboxClient;
             var baseUrl = isLocal ? _localUrl : _seedboxUrl;
 

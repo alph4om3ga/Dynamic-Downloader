@@ -1167,8 +1167,12 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task StopLocalTorrentAndWaitAsync(string torrentHash, CancellationToken cancellationToken)
         {
-            if (_qbitService == null || string.IsNullOrWhiteSpace(torrentHash))
-                return;
+            if (_qbitService == null)
+                throw new InvalidOperationException(
+                    "Local qBittorrent is not configured; the download cannot be moved safely.");
+            if (string.IsNullOrWhiteSpace(torrentHash))
+                throw new InvalidOperationException(
+                    "The downloaded torrent has no hash; its stopped state cannot be confirmed.");
 
             const int maxStopAttempts = 3;
             const int maxStateChecks = 10;
@@ -1178,17 +1182,37 @@ namespace JudasEncodingManager.ViewModels
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!await _qbitService.StopTorrentAsync(
-                        torrentHash,
-                        isLocal: true,
-                        cancellationToken: cancellationToken))
+                // Check the current state before sending /stop. This handles a
+                // torrent that qBittorrent already paused after reaching 100%.
+                var currentInfo = await _qbitService.GetTorrentInfoAsync(
+                    torrentHash,
+                    isLocal: true,
+                    cancellationToken: cancellationToken);
+                if (currentInfo == null)
                 {
                     AddLogEntry(
-                        $"qBittorrent did not confirm the stop request ({stopAttempt}/{maxStopAttempts}).",
+                        $"qBittorrent did not return torrent state ({stopAttempt}/{maxStopAttempts}).",
                         ActivityLogLevel.Warning);
                 }
                 else
                 {
+                    var currentState = currentInfo.State ?? "";
+                    if (QBittorrentService.IsTorrentStoppedState(currentState))
+                    {
+                        AddLogEntry(
+                            $"qBittorrent reports the torrent is already stopped ({currentState}).",
+                            ActivityLogLevel.Info);
+                    }
+                    else if (!await _qbitService.StopTorrentAsync(
+                                 torrentHash,
+                                 isLocal: true,
+                                 cancellationToken: cancellationToken))
+                    {
+                        AddLogEntry(
+                            $"qBittorrent did not confirm the stop request ({stopAttempt}/{maxStopAttempts}).",
+                            ActivityLogLevel.Warning);
+                    }
+
                     for (var stateCheck = 1; stateCheck <= maxStateChecks; stateCheck++)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -1206,11 +1230,10 @@ namespace JudasEncodingManager.ViewModels
                         }
 
                         var state = info.State ?? "";
-                        if (state.StartsWith("paused", StringComparison.OrdinalIgnoreCase) ||
-                            state.StartsWith("stopped", StringComparison.OrdinalIgnoreCase))
+                        if (QBittorrentService.IsTorrentStoppedState(state))
                         {
                             AddLogEntry(
-                                "Local torrent stopped; waiting briefly for qBittorrent to release its file handle.",
+                                $"Local torrent stopped ({state}); waiting briefly for qBittorrent to release its file handle.",
                                 ActivityLogLevel.Info);
                             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                             return;
