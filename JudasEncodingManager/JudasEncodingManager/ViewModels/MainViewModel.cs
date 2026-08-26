@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using System.Xml.Linq;
 using CommunityToolkit.Mvvm.Input;
 using JudasEncodingManager.Models;
@@ -55,6 +56,8 @@ namespace JudasEncodingManager.ViewModels
         private bool _isEditingTracker;
         private string _editingTrackerCredentials = "";
         private bool _isAnidexEnabled = true;
+        private readonly DispatcherTimer _sessionCookieTimer;
+        private const int NyaaCookieSessionValidityDays = 28;
 
         // Folders
         private string _tempFolderSize = "";
@@ -69,6 +72,7 @@ namespace JudasEncodingManager.ViewModels
         private AsyncRelayCommand? _testRssFeedCommand;
         private RelayCommand? _removeTrackerCommand;
         private RelayCommand? _duplicateTrackerCommand;
+        private RelayCommand? _resetNyaaCookieSessionTimerCommand;
 
         // CRD
         private CRDViewModel? _crdViewModel;
@@ -90,6 +94,9 @@ namespace JudasEncodingManager.ViewModels
             _saveFileCommand = new RelayCommand(SaveFile, CanSaveFile);
             SaveFileAsCommand = new RelayCommand(SaveFileAs);
             NewFileCommand = new RelayCommand(NewFile);
+            _resetNyaaCookieSessionTimerCommand = new RelayCommand(
+                ResetNyaaCookieSessionTimer,
+                () => !string.IsNullOrWhiteSpace(NyaaCookieSession));
 
             // Show commands
             AddShowCommand = new RelayCommand(AddShow);
@@ -143,6 +150,13 @@ namespace JudasEncodingManager.ViewModels
             // Set default color scheme
             _selectedColorScheme = ColorSchemes.FirstOrDefault(c => c.Name == "Dark Blue") ?? ColorSchemes.First();
 
+            _sessionCookieTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMinutes(1)
+            };
+            _sessionCookieTimer.Tick += (_, _) => RefreshNyaaCookieSessionStatus();
+            _sessionCookieTimer.Start();
+
             // Try to auto-load default settings file
             var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "JudasEncodingManager", "appSettings.json");
             if (File.Exists(defaultPath))
@@ -155,6 +169,7 @@ namespace JudasEncodingManager.ViewModels
                 _settings = new AppSettings();
                 UpdateTempFolderSize();
             }
+            RefreshNyaaCookieSessionStatus();
         }
 
         private bool CanSaveFile()
@@ -166,6 +181,7 @@ namespace JudasEncodingManager.ViewModels
         private void NotifyCommandsCanExecuteChanged()
         {
             _saveFileCommand?.NotifyCanExecuteChanged();
+            _resetNyaaCookieSessionTimerCommand?.NotifyCanExecuteChanged();
             _removeShowCommand?.NotifyCanExecuteChanged();
             _duplicateShowCommand?.NotifyCanExecuteChanged();
             _addManualEpisodeCommand?.NotifyCanExecuteChanged();
@@ -193,6 +209,7 @@ namespace JudasEncodingManager.ViewModels
         public ICommand SaveFileCommand => _saveFileCommand!;
         public ICommand SaveFileAsCommand { get; }
         public ICommand NewFileCommand { get; }
+        public ICommand ResetNyaaCookieSessionTimerCommand => _resetNyaaCookieSessionTimerCommand!;
 
         // ==================== SHOW COMMANDS ====================
 
@@ -506,7 +523,144 @@ namespace JudasEncodingManager.ViewModels
         public string NyaaCookieSession
         {
             get => _settings.AutoPosting.NyaaCookieSession;
-            set { _settings.AutoPosting.NyaaCookieSession = value; OnPropertyChanged(); HasUnsavedChanges = true; }
+            set
+            {
+                if (_settings.AutoPosting.NyaaCookieSession == value)
+                    return;
+
+                _settings.AutoPosting.NyaaCookieSession = value;
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc = null;
+                    _settings.AutoPosting.NyaaCookieSessionWarningShownAtUtc = null;
+                }
+                else
+                {
+                    _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc = DateTime.UtcNow;
+                    _settings.AutoPosting.NyaaCookieSessionWarningShownAtUtc = null;
+                }
+
+                OnPropertyChanged();
+                RefreshNyaaCookieSessionStatus();
+                _resetNyaaCookieSessionTimerCommand?.NotifyCanExecuteChanged();
+                HasUnsavedChanges = true;
+            }
+        }
+
+        public string NyaaCookieSessionStatus
+        {
+            get
+            {
+                var session = _settings.AutoPosting.NyaaCookieSession;
+                if (string.IsNullOrWhiteSpace(session))
+                    return "No session cookie entered — auto posting cannot authenticate.";
+
+                var updatedAt = _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc;
+                if (!updatedAt.HasValue)
+                    return "Expiration not tracked — replace this session cookie and save to start the 28-day timer.";
+
+                var expiresAt = GetNyaaCookieSessionExpiryUtc(updatedAt.Value);
+                var remaining = expiresAt - DateTime.UtcNow;
+                var localExpiry = expiresAt.ToLocalTime();
+
+                if (remaining <= TimeSpan.Zero)
+                    return $"Expired on {localExpiry:MMMM d, yyyy} — copy a fresh session cookie from Nyaa and replace it.";
+
+                var daysRemaining = Math.Max(1, (int)Math.Ceiling(remaining.TotalDays));
+                if (remaining <= TimeSpan.FromDays(1))
+                    return $"Expires within 1 day ({localExpiry:MMM d, h:mm tt}) — replace the session cookie now.";
+
+                return $"{daysRemaining} days remaining — expires {localExpiry:MMM d, yyyy}";
+            }
+        }
+
+        public SolidColorBrush NyaaCookieSessionStatusBrush
+        {
+            get
+            {
+                var session = _settings.AutoPosting.NyaaCookieSession;
+                var updatedAt = _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc;
+                if (string.IsNullOrWhiteSpace(session))
+                    return CreateBrush(_selectedColorScheme?.TextSecondaryColor ?? "#b0b0b0");
+                if (!updatedAt.HasValue)
+                    return CreateBrush(_selectedColorScheme?.WarningColor ?? "#ff9800");
+
+                var remaining = GetNyaaCookieSessionExpiryUtc(updatedAt.Value) - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                    return CreateBrush(_selectedColorScheme?.ErrorColor ?? "#f44336");
+                if (remaining <= TimeSpan.FromDays(1))
+                    return CreateBrush(_selectedColorScheme?.WarningColor ?? "#ff9800");
+                return CreateBrush(_selectedColorScheme?.SuccessColor ?? "#4caf50");
+            }
+        }
+
+        private static DateTime NormalizeUtc(DateTime value)
+        {
+            return value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
+        }
+
+        private static DateTime GetNyaaCookieSessionExpiryUtc(DateTime updatedAtUtc)
+        {
+            return NormalizeUtc(updatedAtUtc).AddDays(NyaaCookieSessionValidityDays);
+        }
+
+        private void RefreshNyaaCookieSessionStatus()
+        {
+            OnPropertyChanged(nameof(NyaaCookieSessionStatus));
+            OnPropertyChanged(nameof(NyaaCookieSessionStatusBrush));
+            PromptForExpiringNyaaCookieSession();
+        }
+
+        private void PromptForExpiringNyaaCookieSession()
+        {
+            var autoPosting = _settings.AutoPosting;
+            if (string.IsNullOrWhiteSpace(autoPosting.NyaaCookieSession) ||
+                !autoPosting.NyaaCookieSessionUpdatedAtUtc.HasValue)
+                return;
+
+            var updatedAtUtc = NormalizeUtc(autoPosting.NyaaCookieSessionUpdatedAtUtc.Value);
+            var expiresAtUtc = GetNyaaCookieSessionExpiryUtc(updatedAtUtc);
+            var remaining = expiresAtUtc - DateTime.UtcNow;
+            var warningShownAtUtc = autoPosting.NyaaCookieSessionWarningShownAtUtc;
+
+            if (remaining <= TimeSpan.Zero ||
+                remaining > TimeSpan.FromDays(1) ||
+                (warningShownAtUtc.HasValue &&
+                 NormalizeUtc(warningShownAtUtc.Value) >= updatedAtUtc))
+                return;
+
+            // Set this before opening the modal prompt so a timer tick or
+            // re-entrant binding update cannot show the same warning twice.
+            autoPosting.NyaaCookieSessionWarningShownAtUtc = updatedAtUtc;
+            HasUnsavedChanges = true;
+            OnPropertyChanged(nameof(NyaaCookieSessionStatusBrush));
+
+            MessageBox.Show(
+                "Your Nyaa session cookie expires within one day.\n\n" +
+                "Log in to nyaa.si, copy the new session cookie value, replace it in the Auto Posting tab, and save your settings.",
+                "Nyaa Session Cookie Expiring",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        private void ResetNyaaCookieSessionTimer()
+        {
+            if (string.IsNullOrWhiteSpace(NyaaCookieSession))
+                return;
+
+            var result = MessageBox.Show(
+                "Only reset this timer after obtaining fresh session information from Nyaa.\n\n" +
+                "Reset the 28-day timer now?",
+                "Reset Nyaa Session Timer",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc = DateTime.UtcNow;
+            _settings.AutoPosting.NyaaCookieSessionWarningShownAtUtc = null;
+            HasUnsavedChanges = true;
+            RefreshNyaaCookieSessionStatus();
         }
 
         public string AnidexApi
@@ -531,6 +685,7 @@ namespace JudasEncodingManager.ViewModels
                 _selectedColorScheme = value;
                 OnPropertyChanged();
                 UpdateColorPreview();
+                OnPropertyChanged(nameof(NyaaCookieSessionStatusBrush));
             }
         }
 
@@ -725,6 +880,7 @@ namespace JudasEncodingManager.ViewModels
 
                 HasUnsavedChanges = false;
                 _saveFileCommand?.NotifyCanExecuteChanged();
+                RefreshNyaaCookieSessionStatus();
                 StatusMessage = $"Loaded: {Path.GetFileName(path)}";
             }
             catch (Exception ex)
@@ -835,6 +991,9 @@ namespace JudasEncodingManager.ViewModels
             OnPropertyChanged(nameof(TelegramChatId));
             OnPropertyChanged(nameof(NyaaCookieDdlg));
             OnPropertyChanged(nameof(NyaaCookieSession));
+            OnPropertyChanged(nameof(NyaaCookieSessionStatus));
+            OnPropertyChanged(nameof(NyaaCookieSessionStatusBrush));
+            _resetNyaaCookieSessionTimerCommand?.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(AnidexApi));
             OnPropertyChanged(nameof(BasePath));
             OnPropertyChanged(nameof(TempFolder));

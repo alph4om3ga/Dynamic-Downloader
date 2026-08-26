@@ -73,6 +73,23 @@
             </Grid>
         </Border>
 
+        <!-- Nyaa session reminder stays visible while browsing every tab. -->
+        <Border Grid.Row="1"
+                Margin="16,8,16,0"
+                Padding="12,8"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{Binding NyaaCookieSessionStatusBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Nyaa session:" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextBrush}" Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding NyaaCookieSessionStatus}"
+                           Foreground="{Binding NyaaCookieSessionStatusBrush}"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
         <!-- Main Content -->
         <TabControl Grid.Row="2" 
                     Style="{StaticResource ModernTabControl}"
@@ -992,6 +1009,30 @@
                                          TextWrapping="Wrap" 
                                          AcceptsReturn="True"
                                          Height="60" Margin="0,0,0,12"/>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0"
+                                            Background="{StaticResource SurfaceBrush}"
+                                            BorderBrush="{Binding NyaaCookieSessionStatusBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="8,6"
+                                            Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding NyaaCookieSessionStatus}"
+                                                   Foreground="{Binding NyaaCookieSessionStatusBrush}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"/>
+                                    </Border>
+                                    <Button Grid.Column="1"
+                                            Content="Reset 28-day timer"
+                                            Command="{Binding ResetNyaaCookieSessionTimerCommand}"
+                                            Style="{StaticResource SecondaryButton}"
+                                            ToolTip="Use after entering fresh Nyaa session information"/>
+                                </Grid>
 
                                 <TextBlock Text="How to get cookies: Open nyaa.si → Login → Press F12 → Application tab → Cookies → Copy __ddlg and session values" 
                                            Foreground="{StaticResource TextSecondaryBrush}" 

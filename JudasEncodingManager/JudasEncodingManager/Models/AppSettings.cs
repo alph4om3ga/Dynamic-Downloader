@@ -164,6 +164,12 @@ namespace JudasEncodingManager.Models
         [JsonProperty("nyaa_cookie_session")]
         public string NyaaCookieSession { get; set; } = "";
 
+        [JsonProperty("nyaa_cookie_session_updated_at_utc")]
+        public DateTime? NyaaCookieSessionUpdatedAtUtc { get; set; }
+
+        [JsonProperty("nyaa_cookie_session_warning_shown_at_utc")]
+        public DateTime? NyaaCookieSessionWarningShownAtUtc { get; set; }
+
         [JsonProperty("anidex_api")]
         public string AnidexApi { get; set; } = "";
 
