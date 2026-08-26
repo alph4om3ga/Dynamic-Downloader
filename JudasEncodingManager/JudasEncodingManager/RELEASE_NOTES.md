@@ -8,6 +8,47 @@
 - Preserved downloaded media when removing the local torrent entry.
 - Kept the automation queue moving when an individual item fails.
 
+## v1.2.1 (July 29, 2026)
+
+### Bug Fixes
+- Fixed episode-number detection order so unambiguous patterns such as `S01E06` are checked before generic numbers in a title.
+- Prevented show titles containing numbers, such as `Level 999`, from being mistaken for the episode number.
+
+### Maintenance
+- Updated the application and in-app version display to `v1.2.1`.
+
+## v1.2.0 (July 28, 2026)
+
+### Automated Encoding Pipeline
+- Added end-to-end automation from RSS detection through download, encoding, muxing, screenshot capture, torrent creation, FTP upload, seedbox seeding, and Nyaa posting.
+- Added Nyaa RSS monitoring with configurable source-group filtering and episode detection.
+- Added qBittorrent download monitoring with progress reporting.
+- Added PowerShell/VapourSynth x265 encoding support and a five-minute FFmpeg quick-encode test mode.
+- Added automatic audio and subtitle track analysis, language tagging, and Judas track naming conventions.
+- Added smart muxing with English subtitle prioritization and dynamic audio/subtitle tags.
+- Added screenshot capture and ImgBB upload support.
+- Added torrent creation and FTP upload support for the completed release package.
+- Added Nyaa posting with generated descriptions and hidden/public posting modes.
+
+### Show and Queue Management
+- Added weekly show management for adding, editing, and removing shows.
+- Added per-show RSS feeds, source groups, release schedules, expected episode counts, custom episode patterns, episode offsets, and uncensored-release settings.
+- Added episode history and version-aware handling for repacks such as `v2` and `v3`.
+- Added queue controls for monitoring, pausing, resuming, retrying, cancelling, and processing releases.
+
+### Testing and Notifications
+- Added Simulate, Quick Encode, and Full Encode pipeline modes.
+- Added hidden/public release controls for safely testing Nyaa posts.
+- Added Discord notifications for episode discovery, download completion, encoding, and torrent posting.
+- Added machine-name identification in notifications for multi-encoder setups.
+
+### User Interface and Configuration
+- Added the WPF application interface with eight light and dark color schemes.
+- Added embedded local and seedbox qBittorrent WebUI views.
+- Added a real-time, color-coded activity log.
+- Added JSON-based application settings and per-show configuration.
+- Added standalone Windows build scripts and bundled application assets.
+
 ## v1.0.0 (January 29, 2025)
 
 🎉 **Initial Release**
