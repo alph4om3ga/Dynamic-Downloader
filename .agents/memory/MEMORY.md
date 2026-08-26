@@ -1,4 +1,4 @@
 - [Nyaa RSS source filtering](nyaa-rss-source-filtering.md) — A Nyaa RSS URL with `u=` is authoritative; only broad feeds need title-based SourceGroup filtering.
 - [Nyaa session expiry](nyaa-session-expiry.md) — Treat legacy cookies without timestamps as untracked; tie each expiry reminder to its cookie-refresh period.
 - [qBittorrent file finalization](qbittorrent-file-finalization.md) — Never move a local download until qBittorrent explicitly confirms it is paused or stopped.
-- [Hosted release verification constraints](hosted-release-verification-constraints.md) — Release verification needs authenticated GitHub push access and a Windows x64 launch environment.
+- [Hosted release verification constraints](hosted-release-verification-constraints.md) — Verify workflow write access before tags, then validate the hosted Windows package and launch.

@@ -1,10 +1,10 @@
 ---
 name: Hosted release verification constraints
-description: External prerequisites for validating tagged Windows releases from this workspace.
+description: Access and platform prerequisites for validating tagged Windows releases from this workspace.
 ---
 
-Tagged-release verification cannot be completed solely in this Linux workspace when GitHub push credentials and a Windows x64 machine are unavailable.
+Do not create a deliberately mismatched release tag until a credential has successfully updated the hosted workflow file under `.github/workflows`; a release is not fully verified until the hosted jobs, release asset list, and Windows x64 binary launch have been checked.
 
-**Why:** The hosted GitHub Actions workflow must be triggered by a tag, and the output is a Windows GUI executable whose launch cannot be validated on Linux. The available GitHub connector may also be blocked when attempting to write workflow files.
+**Why:** A repository credential may read and update ordinary files while lacking GitHub's separate `workflow` permission. A failed update can leave the hosted workflow invalid or stale, making a mismatch-tag test unsafe and inconclusive. The packaged output is a Windows GUI executable, so Linux-only validation cannot prove the release launches.
 
-**How to apply:** Before treating a Windows release task as complete, confirm an authenticated tag push, successful hosted workflow jobs, the release asset list, and an actual Windows x64 launch check. Keep the task open if any of those external checks cannot be performed.
+**How to apply:** First perform and verify a protected workflow-file update on the target branch. If the OAuth connector remains scoped to `repo` after reauthorization, or the configured Git remote cannot authenticate a push, obtain a repository credential that explicitly supports workflow writes before publishing tags. Then confirm the tagged hosted workflow, exactly one release asset, and a Windows x64 launch.
