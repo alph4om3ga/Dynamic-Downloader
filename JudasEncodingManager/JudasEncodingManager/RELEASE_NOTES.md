@@ -8,6 +8,23 @@
 - Preserved downloaded media when removing the local torrent entry.
 - Kept the automation queue moving when an individual item fails.
 
+### Nyaa Session Management
+- Added 28-day Nyaa session-cookie tracking with persisted refresh timestamps.
+- Added visible session states for missing, legacy/untracked, fresh, expiring, and expired cookies.
+- Added a one-day expiration warning that is shown only once per cookie refresh period.
+- Added automatic timer refresh when a new cookie is entered.
+- Added a confirmed **Reset 28-day timer** control for freshly renewed Nyaa session information.
+
+### RSS Release Detection
+- Fixed release grabbing for uploader-specific Nyaa feeds such as Varyg1001.
+- Treats an RSS feed's explicit `u=` uploader filter as authoritative, so valid releases are not rejected by an unrelated saved source-group value.
+- Preserved title-based source-group filtering for broad RSS feeds without an uploader filter.
+
+### Regression Coverage
+- Added regression checks for Nyaa session expiration states and one-time warning behavior.
+- Added regression coverage for persisted cookie-session timestamps and warning state.
+- Added Windows regression coverage for queue cleanup and release processing behavior.
+
 ## v1.2.1 (July 29, 2026)
 
 ### Bug Fixes
