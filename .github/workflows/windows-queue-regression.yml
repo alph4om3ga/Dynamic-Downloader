@@ -24,3 +24,21 @@ jobs:
 
       - name: Run Windows queue regression
         run: dotnet run --project JudasEncodingManager/RegressionTests/JudasEncodingManager.RegressionTests.csproj --framework net8.0-windows --no-restore
+
+  release-build:
+    name: Release build and packaging
+    needs: queue-regression
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build and package Release application
+        shell: pwsh
+        run: .\JudasEncodingManager\JudasEncodingManager\Build.ps1 -Clean
