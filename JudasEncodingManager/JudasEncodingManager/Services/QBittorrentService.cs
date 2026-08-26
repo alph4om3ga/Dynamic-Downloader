@@ -300,12 +300,7 @@ namespace JudasEncodingManager.Services
         /// </summary>
         public static bool IsTorrentStoppedState(string? state)
         {
-            return state is not null &&
-                   (state.Equals("pausedDL", StringComparison.OrdinalIgnoreCase) ||
-                    state.Equals("pausedUP", StringComparison.OrdinalIgnoreCase) ||
-                    state.Equals("stoppedDL", StringComparison.OrdinalIgnoreCase) ||
-                    state.Equals("stoppedUP", StringComparison.OrdinalIgnoreCase) ||
-                    state.Equals("stopped", StringComparison.OrdinalIgnoreCase));
+            return QBittorrentStatePolicy.IsStoppedState(state);
         }
 
         public async Task<bool> DeleteTorrentAsync(
@@ -433,5 +428,40 @@ namespace JudasEncodingManager.Services
 
         [JsonProperty("eta")]
         public int Eta { get; set; }
+    }
+
+    /// <summary>
+    /// Adapter used by the hand-off workflow so its stop/state-confirmation
+    /// policy can be tested without making HTTP calls.
+    /// </summary>
+    public sealed class QBittorrentStopClient : IQBittorrentStopClient
+    {
+        private readonly QBittorrentService _service;
+
+        public QBittorrentStopClient(QBittorrentService service)
+        {
+            _service = service ?? throw new ArgumentNullException(nameof(service));
+        }
+
+        public async Task<QBittorrentTorrentState?> GetTorrentStateAsync(
+            string hash,
+            CancellationToken cancellationToken)
+        {
+            var info = await _service.GetTorrentInfoAsync(
+                hash,
+                isLocal: true,
+                cancellationToken: cancellationToken);
+            return info is null ? null : new QBittorrentTorrentState(info.State);
+        }
+
+        public Task<bool> StopTorrentAsync(
+            string hash,
+            CancellationToken cancellationToken)
+        {
+            return _service.StopTorrentAsync(
+                hash,
+                isLocal: true,
+                cancellationToken: cancellationToken);
+        }
     }
 }

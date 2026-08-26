@@ -7,4 +7,4 @@ Local qBittorrent downloads must have an explicitly confirmed paused or stopped 
 
 **Why:** A completed-progress response does not guarantee qBittorrent has released its file handle or stopped managing the original path. Moving too early can cause file-lock failures and leave qBittorrent with inconsistent torrent state.
 
-**How to apply:** Retry stop/state confirmation with cancellation support, verify the source file is stable and exclusively accessible, retry transient file operations, then remove only torrent metadata with downloaded data retained. Let later pending queue items continue when one item fails.
+**How to apply:** Retry stop/state confirmation with cancellation support, verify the source file is stable and exclusively accessible, and re-probe exclusive access immediately before every file-move retry. Remove only torrent metadata with downloaded data retained. Let later pending queue items continue when one item fails.

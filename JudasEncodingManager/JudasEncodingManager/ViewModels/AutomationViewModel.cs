@@ -115,6 +115,7 @@ namespace JudasEncodingManager.ViewModels
         
         // Services
         private QBittorrentService? _qbitService;
+        private DownloadHandoffService? _downloadHandoffService;
         private EncodingService? _encodingService;
         private MuxingService? _muxingService;
         private ScreenshotService? _screenshotService;
@@ -198,6 +199,8 @@ namespace JudasEncodingManager.ViewModels
                 settings.QBittorrent.SeedboxUsername,
                 settings.QBittorrent.SeedboxPassword
             );
+            _downloadHandoffService = new DownloadHandoffService(
+                new QBittorrentStopClient(_qbitService));
             
             // Encoding
             _encodingService = new EncodingService
@@ -266,13 +269,13 @@ namespace JudasEncodingManager.ViewModels
             AddLogEntry("Services initialized", ActivityLogLevel.Info);
         }
 
-        // ==================== COLLECTIONS ====================
+        // ---- COLLECTIONS ----
 
         public ObservableCollection<QueueItem> Queue { get; }
         public ObservableCollection<RssItem> TestRunRssItems { get; }
         public ObservableCollection<ActivityLogEntry> ActivityLog { get; }
 
-        // ==================== COMMANDS ====================
+        // ---- COMMANDS ----
 
         public ICommand StartMonitoringCommand { get; }
         public ICommand StopMonitoringCommand { get; }
@@ -291,7 +294,7 @@ namespace JudasEncodingManager.ViewModels
         public ICommand QueueManualReleaseCommand { get; }
         public ICommand ClearActivityLogCommand { get; }
 
-        // ==================== TEST MODE PROPERTIES ====================
+        // ---- TEST MODE PROPERTIES ----
 
         public bool IsSimulatedTest
         {
@@ -405,7 +408,7 @@ namespace JudasEncodingManager.ViewModels
             }
         }
 
-        // ==================== MONITORING PROPERTIES ====================
+        // ---- MONITORING PROPERTIES ----
 
         public bool IsMonitoring
         {
@@ -557,7 +560,7 @@ namespace JudasEncodingManager.ViewModels
             }
         }
 
-        // ==================== SMART RSS SCHEDULING ====================
+        // ---- SMART RSS SCHEDULING ----
 
         /// <summary>
         /// Gets the next release time for a show (today or next week)
@@ -719,7 +722,7 @@ namespace JudasEncodingManager.ViewModels
             }
         }
 
-        // ==================== MONITORING METHODS ====================
+        // ---- MONITORING METHODS ----
 
         private void StartMonitoring()
         {
@@ -1123,7 +1126,7 @@ namespace JudasEncodingManager.ViewModels
                 MonitoringStatus = "Monitoring";
         }
 
-        // ==================== QUEUE PROCESSING ====================
+        // ---- QUEUE PROCESSING ----
 
         private async Task ProcessQueueAsync()
         {
@@ -1135,35 +1138,26 @@ namespace JudasEncodingManager.ViewModels
 
             try
             {
-                while (Queue.Any(q => q.Status == QueueItemStatus.Pending) && !_currentProcessCts.Token.IsCancellationRequested)
-                {
-                    if (IsPaused)
+                await QueueContinuation.ProcessPendingAsync(
+                    Queue,
+                    item => item.Status == QueueItemStatus.Pending,
+                    async (item, cancellationToken) =>
                     {
-                        await Task.Delay(1000);
-                        continue;
-                    }
+                        while (IsPaused)
+                            await Task.Delay(1000, cancellationToken);
 
-                    var nextItem = Queue.FirstOrDefault(q => q.Status == QueueItemStatus.Pending);
-                    if (nextItem == null) break;
-
-                    try
+                        await ProcessQueueItemAsync(item, cancellationToken);
+                    },
+                    (item, ex) =>
                     {
-                        await ProcessQueueItemAsync(nextItem, _currentProcessCts.Token);
-                    }
-                    catch (OperationCanceledException) when (_currentProcessCts.Token.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Individual items are marked failed by their pipeline. Keep
-                        // processing the remaining pending work instead of stalling
-                        // the entire queue behind one unavailable source file.
+                        // ProcessQueueItemAsync records the item's failure before
+                        // it rethrows. The queue runner then advances to the next
+                        // pending item instead of leaving the queue stalled.
                         AddLogEntry(
                             $"Queue item failed and was skipped: {ex.Message}",
                             ActivityLogLevel.Error);
-                    }
-                }
+                    },
+                    _currentProcessCts.Token);
             }
             finally
             {
@@ -1173,98 +1167,15 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task StopLocalTorrentAndWaitAsync(string torrentHash, CancellationToken cancellationToken)
         {
-            if (_qbitService == null)
+            if (_downloadHandoffService == null)
                 throw new InvalidOperationException(
                     "Local qBittorrent is not configured; the download cannot be moved safely.");
-            if (string.IsNullOrWhiteSpace(torrentHash))
-                throw new InvalidOperationException(
-                    "The downloaded torrent has no hash; its stopped state cannot be confirmed.");
-
-            const int maxStopAttempts = 3;
-            const int maxStateChecks = 10;
 
             AddLogEntry("Stopping local torrent so qBittorrent releases the downloaded file...", ActivityLogLevel.Info);
-            for (var stopAttempt = 1; stopAttempt <= maxStopAttempts; stopAttempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Check the current state before sending a command. This handles a
-                // torrent that qBittorrent already paused after reaching 100%.
-                var currentInfo = await _qbitService.GetTorrentInfoAsync(
-                    torrentHash,
-                    isLocal: true,
-                    cancellationToken: cancellationToken);
-                if (currentInfo == null)
-                {
-                    AddLogEntry(
-                        $"qBittorrent did not return torrent state ({stopAttempt}/{maxStopAttempts}).",
-                        ActivityLogLevel.Warning);
-                }
-                else
-                {
-                    var currentState = currentInfo.State ?? "";
-                    if (QBittorrentService.IsTorrentStoppedState(currentState))
-                    {
-                        AddLogEntry(
-                            $"qBittorrent reports the torrent is already stopped ({currentState}).",
-                            ActivityLogLevel.Info);
-                        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                        return;
-                    }
-                }
-
-                var stopResult = await _qbitService.StopTorrentWithDetailsAsync(
-                    torrentHash,
-                    isLocal: true,
-                    cancellationToken: cancellationToken);
-                if (!stopResult.Success)
-                {
-                    AddLogEntry(
-                        $"qBittorrent could not stop the torrent ({stopAttempt}/{maxStopAttempts}): {stopResult.Details}",
-                        ActivityLogLevel.Warning);
-                }
-                else
-                {
-                    AddLogEntry(
-                        $"Requested qBittorrent {stopResult.Command} for the completed torrent.",
-                        ActivityLogLevel.Info);
-                }
-
-                for (var stateCheck = 1; stateCheck <= maxStateChecks; stateCheck++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    var info = await _qbitService.GetTorrentInfoAsync(
-                        torrentHash,
-                        isLocal: true,
-                        cancellationToken: cancellationToken);
-                    if (info == null)
-                    {
-                        AddLogEntry(
-                            "qBittorrent did not return torrent state; retrying the stop request.",
-                            ActivityLogLevel.Warning);
-                        break;
-                    }
-
-                    var state = info.State ?? "";
-                    if (QBittorrentService.IsTorrentStoppedState(state))
-                    {
-                        AddLogEntry(
-                            $"Local torrent stopped ({state}); waiting briefly for qBittorrent to release its file handle.",
-                            ActivityLogLevel.Info);
-                        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                        return;
-                    }
-
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-                }
-
-                if (stopAttempt < maxStopAttempts)
-                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            }
-
-            throw new IOException(
-                $"Unable to confirm that qBittorrent stopped torrent {torrentHash}; the source file was not moved.");
+            await _downloadHandoffService.StopAndWaitAsync(torrentHash, cancellationToken);
+            AddLogEntry(
+                "Local torrent stopped; qBittorrent state was confirmed before file hand-off.",
+                ActivityLogLevel.Info);
         }
 
         private static string? FindDownloadedVideoFile(string contentPath, string downloadPath)
@@ -1294,90 +1205,19 @@ namespace JudasEncodingManager.ViewModels
             return null;
         }
 
-        private async Task WaitForFileToBeReadyAsync(string filePath, CancellationToken cancellationToken)
-        {
-            const int maxChecks = 12;
-            long previousSize = -1;
-            var stableChecks = 0;
-            Exception? lastException = null;
-
-            for (var attempt = 1; attempt <= maxChecks; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    using var file = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
-                    var currentSize = file.Length;
-
-                    if (currentSize > 0 && currentSize == previousSize)
-                        stableChecks++;
-                    else
-                        stableChecks = 0;
-
-                    previousSize = currentSize;
-
-                    if (stableChecks >= 1)
-                        return;
-                }
-                catch (IOException ex)
-                {
-                    lastException = ex;
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    lastException = ex;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            }
-
-            throw new IOException(
-                $"The downloaded file is still in use by another process after {maxChecks} seconds: {filePath}",
-                lastException);
-        }
-
-        private async Task MoveFileWithRetryAsync(
+        private async Task MoveVerifiedLocalDownloadAsync(
             string sourcePath,
             string destinationPath,
             CancellationToken cancellationToken)
         {
-            const int maxAttempts = 5;
-            Exception? lastException = null;
+            if (_downloadHandoffService == null)
+                throw new InvalidOperationException(
+                    "Local qBittorrent is not configured; the download cannot be moved safely.");
 
-            for (var attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    if (File.Exists(destinationPath))
-                        File.Delete(destinationPath);
-
-                    File.Move(sourcePath, destinationPath);
-                    return;
-                }
-                catch (IOException ex)
-                {
-                    lastException = ex;
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    lastException = ex;
-                }
-
-                if (attempt < maxAttempts)
-                {
-                    AddLogEntry(
-                        $"Source file is still in use; retrying move ({attempt}/{maxAttempts})...",
-                        ActivityLogLevel.Warning);
-                    await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
-                }
-            }
-
-            throw new IOException(
-                $"Could not move the downloaded file after {maxAttempts} attempts: {Path.GetFileName(sourcePath)}",
-                lastException);
+            await _downloadHandoffService.MoveAfterExclusiveAccessAsync(
+                sourcePath,
+                destinationPath,
+                cancellationToken);
         }
 
         private async Task RemoveLocalTorrentAfterMoveAsync(string torrentHash, CancellationToken cancellationToken)
@@ -1410,7 +1250,7 @@ namespace JudasEncodingManager.ViewModels
             {
                 item.StartedAt = DateTime.Now;
 
-                // ==================== STAGE 1: Acquire Source File ====================
+                // ---- STAGE 1: Acquire Source File ----
                 if (item.DownloadSource == DownloadSource.CRD)
                 {
                     // File already on disk — move it to the encoding folder
@@ -1499,8 +1339,6 @@ namespace JudasEncodingManager.ViewModels
                     if (string.IsNullOrEmpty(videoFilePath) || !File.Exists(videoFilePath))
                         throw new Exception($"No video file found after download. Content path: {contentPath}");
 
-                    await WaitForFileToBeReadyAsync(videoFilePath, cancellationToken);
-
                     item.SourceFilePath      = videoFilePath;
                     item.SourceFileSizeBytes = new FileInfo(videoFilePath).Length;
                     item.SourceFileName      = Path.GetFileName(videoFilePath);
@@ -1521,7 +1359,10 @@ namespace JudasEncodingManager.ViewModels
                     if (!string.Equals(Path.GetFullPath(item.SourceFilePath), Path.GetFullPath(encodingDestPath), StringComparison.OrdinalIgnoreCase))
                     {
                         AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
-                        await MoveFileWithRetryAsync(item.SourceFilePath, encodingDestPath, cancellationToken);
+                        await MoveVerifiedLocalDownloadAsync(
+                            item.SourceFilePath,
+                            encodingDestPath,
+                            cancellationToken);
                         item.SourceFilePath = encodingDestPath;
                     }
 
@@ -1531,7 +1372,7 @@ namespace JudasEncodingManager.ViewModels
                     item.StatusMessage = "Download complete";
                 }
 
-                // ==================== STAGE 2: Analyze Tracks ====================
+                // ---- STAGE 2: Analyze Tracks ----
                 item.Status        = QueueItemStatus.AnalyzingTracks;
                 item.StatusMessage = "Analyzing audio/subtitle tracks...";
                 AddLogEntry($"🔍 Analyzing tracks: {Path.GetFileName(item.SourceFilePath)}", ActivityLogLevel.Info);
@@ -1541,7 +1382,7 @@ namespace JudasEncodingManager.ViewModels
                 item.SubtitleTracks = subtitleTracks;
                 AddLogEntry($"Found {audioTracks.Count} audio track(s), {subtitleTracks.Count} subtitle track(s)", ActivityLogLevel.Info);
 
-                // ==================== STAGE 3: Encode ====================
+                // ---- STAGE 3: Encode ----
                 item.Status        = QueueItemStatus.Encoding;
                 item.StatusMessage = item.IsTestRun ? "Encoding (5 minute test)..." : "Encoding full episode...";
                 AddLogEntry($"🎬 Starting {(item.IsTestRun ? "5-minute test" : "full episode")} encode...", ActivityLogLevel.Info);
@@ -1576,7 +1417,7 @@ namespace JudasEncodingManager.ViewModels
                 }
                 catch (Exception ex) { AddLogEntry($"⚠️ Cleanup warning: {ex.Message}", ActivityLogLevel.Warning); }
 
-                // ==================== STAGE 4: Mux ====================
+                // ---- STAGE 4: Mux ----
                 item.Status        = QueueItemStatus.Muxing;
                 item.StatusMessage = "Muxing final file...";
                 AddLogEntry("🔧 Muxing final file...", ActivityLogLevel.Info);
@@ -1633,7 +1474,7 @@ namespace JudasEncodingManager.ViewModels
 
                 item.MuxedFilePath = muxResult.OutputPath;
 
-                // ==================== STAGE 5: Screenshots ====================
+                // ---- STAGE 5: Screenshots ----
                 item.Status        = QueueItemStatus.TakingScreenshots;
                 item.StatusMessage = "Taking screenshots...";
                 AddLogEntry("📸 Taking screenshots...", ActivityLogLevel.Info);
@@ -1642,7 +1483,7 @@ namespace JudasEncodingManager.ViewModels
                 item.ScreenshotPaths = screenshotPaths;
                 AddLogEntry($"✅ Captured {screenshotPaths.Count} screenshots", ActivityLogLevel.Success);
 
-                // ==================== STAGE 6: Upload Screenshots ====================
+                // ---- STAGE 6: Upload Screenshots ----
                 item.Status        = QueueItemStatus.UploadingScreenshots;
                 item.StatusMessage = "Uploading screenshots to ImgBB...";
                 AddLogEntry("☁️ Uploading screenshots...", ActivityLogLevel.Info);
@@ -1651,7 +1492,7 @@ namespace JudasEncodingManager.ViewModels
                 item.ScreenshotUrls = screenshotUrls;
                 AddLogEntry($"✅ Uploaded {screenshotUrls.Count} screenshots", ActivityLogLevel.Success);
 
-                // ==================== STAGE 7: Generate Description ====================
+                // ---- STAGE 7: Generate Description ----
                 item.Status        = QueueItemStatus.GeneratingDescription;
                 item.StatusMessage = "Generating Nyaa description...";
                 AddLogEntry("📝 Generating description...", ActivityLogLevel.Info);
@@ -1680,7 +1521,7 @@ namespace JudasEncodingManager.ViewModels
                 item.DescriptionFilePath = descPath;
                 AddLogEntry($"✅ Description generated ({description.Length} chars)", ActivityLogLevel.Success);
 
-                // ==================== STAGE 8: Create Torrent ====================
+                // ---- STAGE 8: Create Torrent ----
                 item.Status        = QueueItemStatus.CreatingTorrent;
                 item.StatusMessage = "Creating torrent file...";
                 AddLogEntry("🧲 Creating torrent...", ActivityLogLevel.Info);
@@ -1694,7 +1535,7 @@ namespace JudasEncodingManager.ViewModels
                 item.TorrentHash     = torrentResult.InfoHash;
                 AddLogEntry($"✅ Torrent created: {torrentResult.InfoHash}", ActivityLogLevel.Success);
 
-                // ==================== STAGE 9: Upload to Server ====================
+                // ---- STAGE 9: Upload to Server ----
                 item.Status        = QueueItemStatus.UploadingEpisode;
                 item.StatusMessage = "Uploading to seedbox...";
                 AddLogEntry("📤 Uploading to seedbox...", ActivityLogLevel.Info);
@@ -1723,7 +1564,7 @@ namespace JudasEncodingManager.ViewModels
                         seedboxAdded ? ActivityLogLevel.Success : ActivityLogLevel.Warning);
                 }
 
-                // ==================== STAGE 10: Post to Nyaa ====================
+                // ---- STAGE 10: Post to Nyaa ----
                 item.Status = QueueItemStatus.PostingToNyaa;
                 var isHidden   = item.IsTestRun;   // automation = public; items marked as test = hidden
                 var visibility = isHidden ? "HIDDEN" : "public";
@@ -1740,7 +1581,7 @@ namespace JudasEncodingManager.ViewModels
                     await _discordService?.SendNyaaPostedAsync(item, nyaaResult.Url, isHidden)!;
                 }
 
-                // ==================== COMPLETE ====================
+                // ---- COMPLETE ----
                 item.Status        = QueueItemStatus.Completed;
                 item.StatusMessage = "Released!";
                 item.CompletedAt   = DateTime.Now;
@@ -1798,7 +1639,7 @@ namespace JudasEncodingManager.ViewModels
             }
         }
 
-        // ==================== QUEUE MANAGEMENT ====================
+        // ---- QUEUE MANAGEMENT ----
 
         /// <summary>
         /// Appends work to the end of the queue. Collection order is the order
@@ -1983,7 +1824,7 @@ namespace JudasEncodingManager.ViewModels
             return status == QueueItemStatus.Completed || IsFailedStatus(status);
         }
 
-        // ==================== TEST RUN ====================
+        // ---- TEST RUN ----
 
         private async Task LoadTestRunRssItemsAsync()
         {
@@ -2279,7 +2120,7 @@ namespace JudasEncodingManager.ViewModels
 
             try
             {
-                // ==================== STAGE 1: Acquire Source File ====================
+                // ---- STAGE 1: Acquire Source File ----
                 // For CRD shows the file is already on disk — skip the torrent download.
                 if (episode.IsLocalFile)
                 {
@@ -2387,8 +2228,6 @@ namespace JudasEncodingManager.ViewModels
                     throw new Exception($"No video file found after download. Content path: {contentPath}, Download path: {downloadPath}");
                 }
 
-                await WaitForFileToBeReadyAsync(videoFilePath, ct);
-
                 queueItem.SourceFilePath = videoFilePath;
                 queueItem.SourceFileSizeBytes = new FileInfo(queueItem.SourceFilePath).Length;
                 
@@ -2419,7 +2258,10 @@ namespace JudasEncodingManager.ViewModels
                 if (queueItem.SourceFilePath != encodingSourcePath)
                 {
                     AddLogEntry($"Moving source to encoding folder: {encodingFolder}", ActivityLogLevel.Info);
-                    await MoveFileWithRetryAsync(queueItem.SourceFilePath, encodingSourcePath, ct);
+                    await MoveVerifiedLocalDownloadAsync(
+                        queueItem.SourceFilePath,
+                        encodingSourcePath,
+                        ct);
                     queueItem.SourceFilePath = encodingSourcePath;
                     AddLogEntry($"Source file moved to: {encodingSourcePath}", ActivityLogLevel.Info);
                 }
@@ -2430,7 +2272,7 @@ namespace JudasEncodingManager.ViewModels
                 TestRunProgress = 15;
                 } // end else (torrent download path)
 
-                // ==================== STAGE 2: Analyze Tracks ====================
+                // ---- STAGE 2: Analyze Tracks ----
                 queueItem.Status = QueueItemStatus.AnalyzingTracks;
                 queueItem.StatusMessage = "Analyzing audio/subtitle tracks...";
                 TestRunStatus = "Analyzing tracks...";
@@ -2444,7 +2286,7 @@ namespace JudasEncodingManager.ViewModels
                 AddLogEntry($"Found {audioTracks.Count} audio track(s), {subtitleTracks.Count} subtitle track(s)", ActivityLogLevel.Info);
                 TestRunProgress = 20;
 
-                // ==================== STAGE 3: Encode ====================
+                // ---- STAGE 3: Encode ----
                 queueItem.Status = QueueItemStatus.Encoding;
                 if (IsQuickEncode)
                 {
@@ -2479,7 +2321,7 @@ namespace JudasEncodingManager.ViewModels
                 var encodeDuration = encodeResult.Duration;
                 await _discordService?.SendEncodingCompleteAsync(queueItem, encodeDuration, encodeResult.FileSizeFormatted)!;
 
-                // ==================== CLEANUP: Remove source file and LWI files ====================
+                // ---- CLEANUP: Remove source file and LWI files ----
                 AddLogEntry("🧹 Cleaning up source files...", ActivityLogLevel.Info);
                 try
                 {
@@ -2503,7 +2345,7 @@ namespace JudasEncodingManager.ViewModels
                     AddLogEntry($"⚠️ Cleanup warning: {ex.Message}", ActivityLogLevel.Warning);
                 }
 
-                // ==================== STAGE 4: Mux ====================
+                // ---- STAGE 4: Mux ----
                 queueItem.Status = QueueItemStatus.Muxing;
                 queueItem.StatusMessage = "Muxing final file...";
                 TestRunStatus = "Muxing...";
@@ -2625,7 +2467,7 @@ namespace JudasEncodingManager.ViewModels
                 AddLogEntry($"✅ Muxed: {Path.GetFileName(muxResult.OutputPath)}", ActivityLogLevel.Success);
                 TestRunProgress = 70;
 
-                // ==================== STAGE 5: Screenshots ====================
+                // ---- STAGE 5: Screenshots ----
                 queueItem.Status = QueueItemStatus.TakingScreenshots;
                 queueItem.StatusMessage = "Taking screenshots...";
                 TestRunStatus = "Taking screenshots...";
@@ -2636,7 +2478,7 @@ namespace JudasEncodingManager.ViewModels
                 AddLogEntry($"✅ Captured {screenshotPaths.Count} screenshots", ActivityLogLevel.Success);
                 TestRunProgress = 78;
 
-                // ==================== STAGE 6: Upload Screenshots ====================
+                // ---- STAGE 6: Upload Screenshots ----
                 queueItem.Status = QueueItemStatus.UploadingScreenshots;
                 queueItem.StatusMessage = "Uploading screenshots...";
                 TestRunStatus = "Uploading screenshots...";
@@ -2647,7 +2489,7 @@ namespace JudasEncodingManager.ViewModels
                 AddLogEntry($"✅ Uploaded {screenshotUrls.Count} screenshots", ActivityLogLevel.Success);
                 TestRunProgress = 85;
 
-                // ==================== STAGE 7: Generate Description ====================
+                // ---- STAGE 7: Generate Description ----
                 queueItem.Status = QueueItemStatus.GeneratingDescription;
                 queueItem.StatusMessage = "Generating description...";
                 TestRunStatus = "Generating description...";
@@ -2722,7 +2564,7 @@ Encoded by: Judas Team
                 AddLogEntry($"✅ Description generated and saved", ActivityLogLevel.Success);
                 TestRunProgress = 88;
 
-                // ==================== STAGE 8: Create Torrent ====================
+                // ---- STAGE 8: Create Torrent ----
                 queueItem.Status = QueueItemStatus.CreatingTorrent;
                 queueItem.StatusMessage = "Creating torrent file...";
                 TestRunStatus = "Creating torrent...";
@@ -2741,7 +2583,7 @@ Encoded by: Judas Team
                 AddLogEntry($"✅ Torrent created: {torrentResult.InfoHash}", ActivityLogLevel.Success);
                 TestRunProgress = 92;
 
-                // ==================== STAGE 9: Upload to Server ====================
+                // ---- STAGE 9: Upload to Server ----
                 queueItem.Status = QueueItemStatus.UploadingEpisode;
                 queueItem.StatusMessage = "Uploading to seedbox...";
                 TestRunStatus = "Uploading to seedbox...";
@@ -2777,7 +2619,7 @@ Encoded by: Judas Team
                 }
                 TestRunProgress = 97;
 
-                // ==================== STAGE 10: Post to Nyaa ====================
+                // ---- STAGE 10: Post to Nyaa ----
                 queueItem.Status = QueueItemStatus.PostingToNyaa;
                 var visibilityText = IsHiddenPost ? "HIDDEN" : "PUBLIC";
                 queueItem.StatusMessage = $"Posting to Nyaa ({visibilityText})...";
@@ -2800,7 +2642,7 @@ Encoded by: Judas Team
                 }
                 TestRunProgress = 100;
 
-                // ==================== COMPLETE ====================
+                // ---- COMPLETE ----
                 queueItem.Status = QueueItemStatus.Completed;
                 var encodeTypeDesc = IsQuickEncode ? "Quick test" : "Full encode";
                 queueItem.StatusMessage = $"{encodeTypeDesc} completed! ({visibilityText})";
@@ -2823,7 +2665,7 @@ Encoded by: Judas Team
             }
         }
 
-        // ==================== ACTIVITY LOG ====================
+        // ---- ACTIVITY LOG ----
 
         private void AddLogEntry(string message, ActivityLogLevel level)
         {
@@ -2865,7 +2707,7 @@ Encoded by: Judas Team
             AddLogEntry("Activity log cleared", ActivityLogLevel.Info);
         }
 
-        // ==================== COMMAND NOTIFICATION ====================
+        // ---- COMMAND NOTIFICATION ----
 
         private void NotifyCommandsChanged()
         {

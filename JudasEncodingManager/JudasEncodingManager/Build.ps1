@@ -21,28 +21,34 @@ Set-Location $ScriptDir
 
 # Clean if requested
 if ($Clean) {
-    Write-Host "[1/4] Cleaning previous builds..." -ForegroundColor Yellow
+    Write-Host "[1/5] Cleaning previous builds..." -ForegroundColor Yellow
     if (Test-Path "bin") { Remove-Item -Recurse -Force "bin" }
     if (Test-Path "obj") { Remove-Item -Recurse -Force "obj" }
     Write-Host "      Cleaned!" -ForegroundColor Green
 } else {
-    Write-Host "[1/4] Skipping clean (use -Clean to clean)" -ForegroundColor Gray
+    Write-Host "[1/5] Skipping clean (use -Clean to clean)" -ForegroundColor Gray
 }
 
 # Restore packages
-Write-Host "[2/4] Restoring NuGet packages..." -ForegroundColor Yellow
+Write-Host "[2/5] Restoring NuGet packages..." -ForegroundColor Yellow
 dotnet restore
 if ($LASTEXITCODE -ne 0) { throw "Restore failed" }
 Write-Host "      Restored!" -ForegroundColor Green
 
+# Run qBittorrent hand-off safety checks before producing a release build.
+Write-Host "[3/5] Running qBittorrent hand-off regression checks..." -ForegroundColor Yellow
+dotnet run --project "..\RegressionTests\JudasEncodingManager.RegressionTests.csproj"
+if ($LASTEXITCODE -ne 0) { throw "qBittorrent hand-off regression checks failed" }
+Write-Host "      Passed!" -ForegroundColor Green
+
 # Build
-Write-Host "[3/4] Building project..." -ForegroundColor Yellow
+Write-Host "[4/5] Building project..." -ForegroundColor Yellow
 dotnet build -c Release --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Write-Host "      Built!" -ForegroundColor Green
 
 # Publish single-file executable
-Write-Host "[4/4] Publishing single-file executable..." -ForegroundColor Yellow
+Write-Host "[5/5] Publishing single-file executable..." -ForegroundColor Yellow
 dotnet publish -c Release --no-build -o ".\publish"
 if ($LASTEXITCODE -ne 0) { throw "Publish failed" }
 Write-Host "      Published!" -ForegroundColor Green
