@@ -26,5 +26,5 @@ description = "The exact workflow file that exists on the current Replit main br
 id = "bQ2EafawdL6gD99TVOqY1"
 uri = "file://attached_assets/release-build-hotfix.zip"
 type = "unspecified"
-title = "Release build hotfix — restore regression project"
-description = "Single Git patch and instructions to fix the failed Windows Release build and packaging job."
+title = "Release v1.3 hotfix"
+description = "Updated patch aligning the project and release guard to v1.3, including the clean-runner regression restore fix."

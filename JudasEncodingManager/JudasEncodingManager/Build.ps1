@@ -24,7 +24,7 @@ function ConvertTo-ReleaseVersion {
         '^[vV]?(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:\.\d+)?$'
     )
     if (-not $match.Success) {
-        throw "Invalid $Source version '$Version'. Expected a version such as 1.3.1 or v1.3.1."
+        throw "Invalid $Source version '$Version'. Expected a version such as 1.3 or v1.3."
     }
 
     $patch = if ($match.Groups["patch"].Success) {
