@@ -1,5 +1,13 @@
 # Release Notes
 
+## v1.3 (August 25, 2026)
+
+### Reliability
+- Hardened local qBittorrent hand-offs by confirming a stopped state before moving downloaded media.
+- Added exclusive-access checks and retry handling for Windows file locks.
+- Preserved downloaded media when removing the local torrent entry.
+- Kept the automation queue moving when an individual item fails.
+
 ## v1.0.0 (January 29, 2025)
 
 🎉 **Initial Release**

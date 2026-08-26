@@ -9,7 +9,7 @@
 
     <AssemblyName>JudasEncodingManager</AssemblyName>
     <RootNamespace>JudasEncodingManager</RootNamespace>
-    <Version>1.2.1</Version>
+    <Version>1.3</Version>
     <Authors>Judas Team</Authors>
     <Description>Encoding Pipeline Manager for Judas</Description>
     <Company>Judas</Company>
