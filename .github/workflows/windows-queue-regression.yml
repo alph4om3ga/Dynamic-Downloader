@@ -47,7 +47,14 @@ jobs:
 
       - name: Build and package Release application
         shell: pwsh
-        run: .\JudasEncodingManager\JudasEncodingManager\Build.ps1 -Clean
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          $buildArguments = @("-Clean")
+          if ($env:RELEASE_TAG) {
+            $buildArguments += @("-ExpectedVersion", $env:RELEASE_TAG)
+          }
+          & .\JudasEncodingManager\JudasEncodingManager\Build.ps1 @buildArguments
 
       - name: Upload verified Windows package
         uses: actions/upload-artifact@v4
