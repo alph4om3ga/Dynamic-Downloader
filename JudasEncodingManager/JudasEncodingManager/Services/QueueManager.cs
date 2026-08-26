@@ -822,7 +822,9 @@ namespace JudasEncodingManager.Services
                 }
 
                 // 9. Cleanup source files
-                await CleanupAfterEncodingAsync(item);
+                // File cleanup is synchronous and can touch many files. Keep it off the
+                // calling context so queue processing does not block the UI thread.
+                await Task.Run(() => CleanupAfterEncoding(item));
 
                 // 10. Complete!
                 item.Status = QueueItemStatus.Completed;
@@ -844,7 +846,7 @@ namespace JudasEncodingManager.Services
         /// <summary>
         /// Cleans up source files, LWI index files, and temp folders after successful encoding
         /// </summary>
-        private async Task CleanupAfterEncodingAsync(QueueItem item)
+        private void CleanupAfterEncoding(QueueItem item)
         {
             try
             {
