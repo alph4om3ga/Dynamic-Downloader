@@ -42,3 +42,10 @@ jobs:
       - name: Build and package Release application
         shell: pwsh
         run: .\JudasEncodingManager\JudasEncodingManager\Build.ps1 -Clean
+
+      - name: Upload verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: JudasEncodingManager-windows-${{ github.run_id }}
+          path: JudasEncodingManager/JudasEncodingManager/publish/JudasEncodingManager.exe
+          if-no-files-found: error
