@@ -1,0 +1,79 @@
+name: Windows queue regression
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  queue-regression:
+    name: QueueManager cleanup/completion regression
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore regression project
+        run: dotnet restore JudasEncodingManager/RegressionTests/JudasEncodingManager.RegressionTests.csproj
+
+      - name: Run Windows queue regression
+        run: dotnet run --project JudasEncodingManager/RegressionTests/JudasEncodingManager.RegressionTests.csproj --framework net8.0-windows --no-restore
+
+  release-build:
+    name: Release build and packaging
+    needs: queue-regression
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build and package Release application
+        shell: pwsh
+        run: .\JudasEncodingManager\JudasEncodingManager\Build.ps1 -Clean
+
+      - name: Upload verified Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: JudasEncodingManager-windows-${{ github.run_id }}
+          path: JudasEncodingManager/JudasEncodingManager/publish/JudasEncodingManager.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish tagged GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: JudasEncodingManager-windows-${{ github.run_id }}
+          path: release
+
+      - name: Publish Windows package to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/JudasEncodingManager.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true
