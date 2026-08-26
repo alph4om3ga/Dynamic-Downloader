@@ -1,0 +1,23 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ZNH4Y0E6APjM7hUlnR_7t"
+uri = "file://attached_assets/windows-queue-regression-github-files.zip"
+type = "unspecified"
+title = "GitHub update files — Windows workflow"
+description = "ZIP containing the missing .github/workflows/windows-queue-regression.yml file, an applyable Git patch, and README instructions."
+
+[[outputs]]
+id = "AmuzyADsHCDt51YiDpRWk"
+uri = "file://attached_assets/github-update/windows-queue-regression.patch"
+type = "unspecified"
+title = "Git patch — add Windows queue workflow"
+description = "Apply this patch from the repository root with git apply to add the missing workflow file."
+
+[[outputs]]
+id = "68iFEnut8QxzFhP9OdTUt"
+uri = "file://attached_assets/github-update/windows-queue-regression.yml"
+type = "unspecified"
+title = "Windows queue regression workflow"
+description = "The exact workflow file that exists on the current Replit main branch but not on origin/main."
