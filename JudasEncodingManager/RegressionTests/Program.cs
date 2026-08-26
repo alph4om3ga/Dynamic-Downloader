@@ -15,6 +15,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("probes access before every production move retry", ProbesBeforeEveryProductionMoveRetryAsync),
     ("continues with the next queue item after a failed stop", ContinuesQueueAfterFailedStopAsync),
     ("keeps filesystem cleanup off the caller and completes after cleanup", KeepsCleanupOffCallerAsync),
+#if WINDOWS_QUEUE_MANAGER_REGRESSION
+    ("publishes queue completion only after cleanup", QueueManagerPublishesCompletionAfterCleanupAsync),
+#endif
     ("classifies every Nyaa session state at the right time", ClassifiesNyaaSessionStatesAsync),
     ("shows the Nyaa one-day warning only once per cookie period", DeduplicatesNyaaSessionWarningAsync),
     ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync)
@@ -221,6 +224,107 @@ static async Task KeepsCleanupOffCallerAsync()
             Directory.Delete(root, recursive: true);
     }
 }
+
+#if WINDOWS_QUEUE_MANAGER_REGRESSION
+static async Task QueueManagerPublishesCompletionAfterCleanupAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"jem-queue-manager-{Guid.NewGuid():N}");
+    var encodingFolder = Path.Combine(root, "Encoding");
+    var sourcePath = Path.Combine(encodingFolder, "source.mkv");
+    var indexPath = Path.Combine(encodingFolder, "source.lwi");
+    var tempFolder = Path.Combine(encodingFolder, "done");
+    var screenshotPath = Path.Combine(root, "Screenshots", "screenshot.jpg");
+    using var cleanupStarted = new ManualResetEventSlim();
+    using var allowCleanupToFinish = new ManualResetEventSlim();
+    var cleanupGateReleased = false;
+    var completedNotifications = 0;
+    var cleanupFinishedWhenCompletedWasPublished = false;
+    Directory.CreateDirectory(tempFolder);
+    Directory.CreateDirectory(Path.GetDirectoryName(screenshotPath)!);
+    File.WriteAllText(sourcePath, "source");
+    File.WriteAllText(indexPath, "index");
+    File.WriteAllText(Path.Combine(tempFolder, "intermediate.bin"), "temporary");
+    File.WriteAllText(screenshotPath, "screenshot");
+
+    var manager = new QueueManager(
+        (_, _) => Task.CompletedTask,
+        () =>
+        {
+            cleanupStarted.Set();
+            allowCleanupToFinish.Wait();
+            cleanupGateReleased = true;
+        })
+    {
+        BasePath = root
+    };
+    var item = new QueueItem
+    {
+        Show = new WeeklyShow { OutputFileTitle = "Queue completion test" },
+        EpisodeNumber = 1,
+        SourceFileName = "source.mkv",
+        SourceFilePath = sourcePath,
+        ScreenshotPaths = new List<string> { screenshotPath }
+    };
+
+    item.PropertyChanged += (_, args) =>
+    {
+        if (args.PropertyName == nameof(QueueItem.Status) &&
+            item.Status == QueueItemStatus.Completed)
+        {
+            completedNotifications++;
+            cleanupFinishedWhenCompletedWasPublished =
+                !File.Exists(sourcePath) &&
+                !File.Exists(indexPath) &&
+                !Directory.Exists(tempFolder) &&
+                !File.Exists(screenshotPath);
+        }
+    };
+
+    Task? processing = null;
+    try
+    {
+        processing = manager.ProcessItemAsync(item, CancellationToken.None);
+
+        Assert(cleanupStarted.Wait(TimeSpan.FromSeconds(5)),
+            "QueueManager did not enter CleanupAfterEncoding.");
+        Assert(!processing.IsCompleted,
+            "ProcessItemAsync completed while CleanupAfterEncoding was still blocked.");
+        Assert(item.Status != QueueItemStatus.Completed,
+            "The queue item reached Completed while actual cleanup was still blocked.");
+        Assert(completedNotifications == 0,
+            "The UI-facing Completed notification was published before actual cleanup finished.");
+        Assert(File.Exists(sourcePath), "The source file was cleaned up before the cleanup gate released.");
+        Assert(File.Exists(indexPath), "The LWI index was cleaned up before the cleanup gate released.");
+        Assert(Directory.Exists(tempFolder), "The temporary folder was cleaned up before the cleanup gate released.");
+        Assert(File.Exists(screenshotPath), "The screenshot was cleaned up before the cleanup gate released.");
+
+        allowCleanupToFinish.Set();
+        await processing;
+
+        Assert(cleanupGateReleased, "The cleanup gate did not release.");
+        Assert(!File.Exists(sourcePath), "CleanupAfterEncoding did not delete the source file.");
+        Assert(!File.Exists(indexPath), "CleanupAfterEncoding did not delete the LWI index.");
+        Assert(!Directory.Exists(tempFolder), "CleanupAfterEncoding did not delete the temporary folder.");
+        Assert(!File.Exists(screenshotPath), "CleanupAfterEncoding did not delete the screenshot.");
+        Assert(item.Status == QueueItemStatus.Completed,
+            "QueueManager did not publish the completed status.");
+        Assert(completedNotifications == 1,
+            "QueueManager should publish exactly one UI-facing Completed notification.");
+        Assert(cleanupFinishedWhenCompletedWasPublished,
+            "QueueManager published Completed before CleanupAfterEncoding finished.");
+        Assert(item.CompletedAt.HasValue,
+            "QueueManager did not record the completion time.");
+    }
+    finally
+    {
+        allowCleanupToFinish.Set();
+        if (processing != null)
+            await processing;
+        if (Directory.Exists(root))
+            Directory.Delete(root, recursive: true);
+    }
+}
+#endif
 
 static Task ClassifiesNyaaSessionStatesAsync()
 {

@@ -22,6 +22,8 @@ namespace JudasEncodingManager.Services
         private readonly TorrentService _torrentService;
         private readonly NyaaService _nyaaService;
         private readonly DiscordService _discordService;
+        private readonly Func<QueueItem, CancellationToken, Task>? _processBeforeCleanupAsync;
+        private readonly Action? _cleanupStarted;
 
         private CancellationTokenSource? _monitoringCts;
         private CancellationTokenSource? _processingCts;
@@ -55,8 +57,16 @@ namespace JudasEncodingManager.Services
         public int RssCheckIntervalMinutes { get; set; } = 5;
         public string SeedboxReleasesPath { get; set; } = "Releases/";
 
-        public QueueManager()
+        public QueueManager() : this(null, null)
         {
+        }
+
+        internal QueueManager(
+            Func<QueueItem, CancellationToken, Task>? processBeforeCleanupAsync,
+            Action? cleanupStarted)
+        {
+            _processBeforeCleanupAsync = processBeforeCleanupAsync;
+            _cleanupStarted = cleanupStarted;
             _rssService = new RssService();
             _qbitService = new QBittorrentService();
             _encodingService = new EncodingService();
@@ -608,7 +618,7 @@ namespace JudasEncodingManager.Services
             }
         }
 
-        private async Task ProcessItemAsync(QueueItem item, CancellationToken cancellationToken)
+        internal async Task ProcessItemAsync(QueueItem item, CancellationToken cancellationToken)
         {
             try
             {
@@ -635,6 +645,12 @@ namespace JudasEncodingManager.Services
                     }
                 }
 
+                if (_processBeforeCleanupAsync != null)
+                {
+                    await _processBeforeCleanupAsync(item, cancellationToken);
+                }
+                else
+                {
                 // 0. Analyze source tracks
                 item.Status = QueueItemStatus.AnalyzingTracks;
                 item.StatusMessage = "Analyzing tracks...";
@@ -821,6 +837,8 @@ namespace JudasEncodingManager.Services
                     }
                 }
 
+                }
+
                 // 9. Cleanup source files
                 // File cleanup is synchronous and can touch many files. Keep it off the
                 // calling context so queue processing does not block the UI thread.
@@ -851,6 +869,7 @@ namespace JudasEncodingManager.Services
             try
             {
                 Log("🧹 Starting cleanup...", ActivityLogLevel.Info, item);
+                _cleanupStarted?.Invoke();
 
                 // 1. Delete source file
                 if (File.Exists(item.SourceFilePath))

@@ -1,17 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;net8.0-windows</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <DefineConstants>$(DefineConstants);WINDOWS_QUEUE_MANAGER_REGRESSION</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="../JudasEncodingManager/Services/QBittorrentStatePolicy.cs" Link="Services/QBittorrentStatePolicy.cs" />
-    <Compile Include="../JudasEncodingManager/Services/DownloadHandoffService.cs" Link="Services/DownloadHandoffService.cs" />
-    <Compile Include="../JudasEncodingManager/Services/QueueContinuation.cs" Link="Services/QueueContinuation.cs" />
-    <Compile Include="../JudasEncodingManager/Services/NyaaCookieSessionPolicy.cs" Link="Services/NyaaCookieSessionPolicy.cs" />
-    <Compile Include="../JudasEncodingManager/Models/AppSettings.cs" Link="Models/AppSettings.cs" />
+    <Compile Include="../JudasEncodingManager/Services/QBittorrentStatePolicy.cs" Link="Services/QBittorrentStatePolicy.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Services/DownloadHandoffService.cs" Link="Services/DownloadHandoffService.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Services/QueueContinuation.cs" Link="Services/QueueContinuation.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Services/NyaaCookieSessionPolicy.cs" Link="Services/NyaaCookieSessionPolicy.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Models/AppSettings.cs" Link="Models/AppSettings.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <ProjectReference Include="../JudasEncodingManager/JudasEncodingManager.csproj" />
   </ItemGroup>
 
   <ItemGroup>
