@@ -57,7 +57,6 @@ namespace JudasEncodingManager.ViewModels
         private string _editingTrackerCredentials = "";
         private bool _isAnidexEnabled = true;
         private readonly DispatcherTimer _sessionCookieTimer;
-        private const int NyaaCookieSessionValidityDays = 28;
 
         // Folders
         private string _tempFolderSize = "";
@@ -556,18 +555,19 @@ namespace JudasEncodingManager.ViewModels
                     return "No session cookie entered — auto posting cannot authenticate.";
 
                 var updatedAt = _settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc;
-                if (!updatedAt.HasValue)
+                var state = NyaaCookieSessionPolicy.GetState(session, updatedAt, DateTime.UtcNow);
+                if (state == NyaaCookieSessionState.Untracked)
                     return "Expiration not tracked — replace this session cookie and save to start the 28-day timer.";
 
-                var expiresAt = GetNyaaCookieSessionExpiryUtc(updatedAt.Value);
+                var expiresAt = NyaaCookieSessionPolicy.GetExpiryUtc(updatedAt!.Value);
                 var remaining = expiresAt - DateTime.UtcNow;
                 var localExpiry = expiresAt.ToLocalTime();
 
-                if (remaining <= TimeSpan.Zero)
+                if (state == NyaaCookieSessionState.Expired)
                     return $"Expired on {localExpiry:MMMM d, yyyy} — copy a fresh session cookie from Nyaa and replace it.";
 
                 var daysRemaining = Math.Max(1, (int)Math.Ceiling(remaining.TotalDays));
-                if (remaining <= TimeSpan.FromDays(1))
+                if (state == NyaaCookieSessionState.Expiring)
                     return $"Expires within 1 day ({localExpiry:MMM d, h:mm tt}) — replace the session cookie now.";
 
                 return $"{daysRemaining} days remaining — expires {localExpiry:MMM d, yyyy}";
@@ -585,23 +585,13 @@ namespace JudasEncodingManager.ViewModels
                 if (!updatedAt.HasValue)
                     return CreateBrush(_selectedColorScheme?.WarningColor ?? "#ff9800");
 
-                var remaining = GetNyaaCookieSessionExpiryUtc(updatedAt.Value) - DateTime.UtcNow;
-                if (remaining <= TimeSpan.Zero)
+                var state = NyaaCookieSessionPolicy.GetState(session, updatedAt, DateTime.UtcNow);
+                if (state == NyaaCookieSessionState.Expired)
                     return CreateBrush(_selectedColorScheme?.ErrorColor ?? "#f44336");
-                if (remaining <= TimeSpan.FromDays(1))
+                if (state == NyaaCookieSessionState.Expiring)
                     return CreateBrush(_selectedColorScheme?.WarningColor ?? "#ff9800");
                 return CreateBrush(_selectedColorScheme?.SuccessColor ?? "#4caf50");
             }
-        }
-
-        private static DateTime NormalizeUtc(DateTime value)
-        {
-            return value.Kind == DateTimeKind.Utc ? value : value.ToUniversalTime();
-        }
-
-        private static DateTime GetNyaaCookieSessionExpiryUtc(DateTime updatedAtUtc)
-        {
-            return NormalizeUtc(updatedAtUtc).AddDays(NyaaCookieSessionValidityDays);
         }
 
         private void RefreshNyaaCookieSessionStatus()
@@ -618,15 +608,13 @@ namespace JudasEncodingManager.ViewModels
                 !autoPosting.NyaaCookieSessionUpdatedAtUtc.HasValue)
                 return;
 
-            var updatedAtUtc = NormalizeUtc(autoPosting.NyaaCookieSessionUpdatedAtUtc.Value);
-            var expiresAtUtc = GetNyaaCookieSessionExpiryUtc(updatedAtUtc);
-            var remaining = expiresAtUtc - DateTime.UtcNow;
-            var warningShownAtUtc = autoPosting.NyaaCookieSessionWarningShownAtUtc;
-
-            if (remaining <= TimeSpan.Zero ||
-                remaining > TimeSpan.FromDays(1) ||
-                (warningShownAtUtc.HasValue &&
-                 NormalizeUtc(warningShownAtUtc.Value) >= updatedAtUtc))
+            var updatedAtUtc = NyaaCookieSessionPolicy.NormalizeUtc(
+                autoPosting.NyaaCookieSessionUpdatedAtUtc.Value);
+            if (!NyaaCookieSessionPolicy.ShouldShowWarning(
+                    autoPosting.NyaaCookieSession,
+                    updatedAtUtc,
+                    autoPosting.NyaaCookieSessionWarningShownAtUtc,
+                    DateTime.UtcNow))
                 return;
 
             // Set this before opening the modal prompt so a timer tick or

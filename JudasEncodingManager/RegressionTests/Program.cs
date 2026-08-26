@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using JudasEncodingManager.Services;
+using JudasEncodingManager.Models;
+using Newtonsoft.Json;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -10,7 +13,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("does not move media until exclusive access succeeds", PreventsMoveBeforeExclusiveAccessAsync),
     ("revalidates access when it changes before the move", RevalidatesAccessBeforeMoveAsync),
     ("probes access before every production move retry", ProbesBeforeEveryProductionMoveRetryAsync),
-    ("continues with the next queue item after a failed stop", ContinuesQueueAfterFailedStopAsync)
+    ("continues with the next queue item after a failed stop", ContinuesQueueAfterFailedStopAsync),
+    ("classifies every Nyaa session state at the right time", ClassifiesNyaaSessionStatesAsync),
+    ("shows the Nyaa one-day warning only once per cookie period", DeduplicatesNyaaSessionWarningAsync),
+    ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync)
 };
 
 var failures = new List<string>();
@@ -39,7 +45,7 @@ if (failures.Count > 0)
 }
 
 Console.WriteLine();
-Console.WriteLine($"{tests.Length} qBittorrent hand-off regression tests passed.");
+Console.WriteLine($"{tests.Length} regression tests passed.");
 return 0;
 
 static Task RecognizesStoppedStateNamesAsync()
@@ -158,6 +164,81 @@ static async Task ProbesBeforeEveryProductionMoveRetryAsync()
         "probe", "move"
     }), "LocalFileHandoff must probe exclusive access before every move retry.");
     Assert(fileOperations.MoveCalls == 2, "Expected one failed move attempt followed by a retry.");
+}
+
+static Task ClassifiesNyaaSessionStatesAsync()
+{
+    var now = new DateTime(2026, 8, 26, 12, 0, 0, DateTimeKind.Utc);
+
+    Assert(
+        NyaaCookieSessionPolicy.GetState("", now.AddDays(-1), now) == NyaaCookieSessionState.Missing,
+        "An empty session should be reported as missing.");
+    Assert(
+        NyaaCookieSessionPolicy.GetState("legacy", null, now) == NyaaCookieSessionState.Untracked,
+        "A legacy session without a timestamp should remain untracked.");
+    Assert(
+        NyaaCookieSessionPolicy.GetState("fresh", now.AddDays(-7), now) == NyaaCookieSessionState.Fresh,
+        "A session with more than one day remaining should be fresh.");
+    Assert(
+        NyaaCookieSessionPolicy.GetState("expiring", now.AddDays(-27).AddHours(-12), now) ==
+            NyaaCookieSessionState.Expiring,
+        "A session with one day or less remaining should be expiring.");
+    Assert(
+        NyaaCookieSessionPolicy.GetState("expired", now.AddDays(-28), now) == NyaaCookieSessionState.Expired,
+        "A session at its expiry should be expired.");
+
+    return Task.CompletedTask;
+}
+
+static Task DeduplicatesNyaaSessionWarningAsync()
+{
+    var now = new DateTime(2026, 8, 26, 12, 0, 0, DateTimeKind.Utc);
+    var updatedAt = now.AddDays(-27).AddHours(-12);
+
+    Assert(
+        NyaaCookieSessionPolicy.ShouldShowWarning("session", updatedAt, null, now),
+        "The first visit during the final day should show a warning.");
+    Assert(
+        !NyaaCookieSessionPolicy.ShouldShowWarning("session", updatedAt, updatedAt, now),
+        "The same cookie period should not show the warning twice.");
+    Assert(
+        NyaaCookieSessionPolicy.ShouldShowWarning("replacement", updatedAt.AddMinutes(1), updatedAt, now),
+        "A replacement cookie period should be eligible for a new warning.");
+    var resetAt = now;
+    var resetWarningTime = resetAt.AddDays(27).AddHours(12);
+    Assert(
+        NyaaCookieSessionPolicy.ShouldShowWarning("session", resetAt, null, resetWarningTime),
+        "A confirmed timer reset should make the final-day warning eligible again.");
+    Assert(
+        !NyaaCookieSessionPolicy.ShouldShowWarning("session", updatedAt, null, now.AddHours(13)),
+        "A warning should not be shown after the cookie expires.");
+    Assert(
+        !NyaaCookieSessionPolicy.ShouldShowWarning("legacy", null, null, now),
+        "Untracked legacy cookies should not trigger a timed warning.");
+
+    return Task.CompletedTask;
+}
+
+static Task RoundTripsNyaaSessionStateAsync()
+{
+    var updatedAt = new DateTime(2026, 8, 1, 9, 30, 0, DateTimeKind.Utc);
+    var warningShownAt = new DateTime(2026, 8, 28, 9, 30, 0, DateTimeKind.Utc);
+    var settings = new AppSettings();
+    settings.AutoPosting.NyaaCookieSession = "session-value";
+    settings.AutoPosting.NyaaCookieSessionUpdatedAtUtc = updatedAt;
+    settings.AutoPosting.NyaaCookieSessionWarningShownAtUtc = warningShownAt;
+
+    var restored = JsonConvert.DeserializeObject<AppSettings>(
+        JsonConvert.SerializeObject(settings))!;
+
+    Assert(restored.AutoPosting.NyaaCookieSession == "session-value",
+        "The session cookie was not preserved.");
+    Assert(restored.AutoPosting.NyaaCookieSessionUpdatedAtUtc == updatedAt,
+        "The session expiry timestamp was not preserved.");
+    Assert(restored.AutoPosting.NyaaCookieSessionWarningShownAtUtc == warningShownAt,
+        "The warning marker was not preserved.");
+
+    return Task.CompletedTask;
 }
 
 static DownloadHandoffService CreateFastHandoff(

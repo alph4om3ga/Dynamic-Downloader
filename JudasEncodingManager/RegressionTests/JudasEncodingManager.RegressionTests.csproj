@@ -10,5 +10,11 @@
     <Compile Include="../JudasEncodingManager/Services/QBittorrentStatePolicy.cs" Link="Services/QBittorrentStatePolicy.cs" />
     <Compile Include="../JudasEncodingManager/Services/DownloadHandoffService.cs" Link="Services/DownloadHandoffService.cs" />
     <Compile Include="../JudasEncodingManager/Services/QueueContinuation.cs" Link="Services/QueueContinuation.cs" />
+    <Compile Include="../JudasEncodingManager/Services/NyaaCookieSessionPolicy.cs" Link="Services/NyaaCookieSessionPolicy.cs" />
+    <Compile Include="../JudasEncodingManager/Models/AppSettings.cs" Link="Models/AppSettings.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 </Project>

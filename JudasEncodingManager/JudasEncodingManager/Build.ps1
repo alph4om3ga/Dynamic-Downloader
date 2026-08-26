@@ -35,10 +35,10 @@ dotnet restore
 if ($LASTEXITCODE -ne 0) { throw "Restore failed" }
 Write-Host "      Restored!" -ForegroundColor Green
 
-# Run qBittorrent hand-off safety checks before producing a release build.
-Write-Host "[3/5] Running qBittorrent hand-off regression checks..." -ForegroundColor Yellow
+# Run focused safety checks before producing a release build.
+Write-Host "[3/5] Running regression checks..." -ForegroundColor Yellow
 dotnet run --project "..\RegressionTests\JudasEncodingManager.RegressionTests.csproj"
-if ($LASTEXITCODE -ne 0) { throw "qBittorrent hand-off regression checks failed" }
+if ($LASTEXITCODE -ne 0) { throw "Regression checks failed" }
 Write-Host "      Passed!" -ForegroundColor Green
 
 # Build
