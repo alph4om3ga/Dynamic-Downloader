@@ -32,6 +32,8 @@ jobs:
         run: dotnet run --project JudasEncodingManager/RegressionTests/JudasEncodingManager.RegressionTests.csproj --framework net8.0-windows --no-restore
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
   release-version-regression:
     name: Release version mismatch regression
     runs-on: windows-latest
