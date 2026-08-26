@@ -1,0 +1,10 @@
+diff --git a/JudasEncodingManager/JudasEncodingManager/JudasEncodingManager.csproj b/JudasEncodingManager/JudasEncodingManager/JudasEncodingManager.csproj
+--- a/JudasEncodingManager/JudasEncodingManager/JudasEncodingManager.csproj
++++ b/JudasEncodingManager/JudasEncodingManager/JudasEncodingManager.csproj
+@@ -10,5 +10,5 @@
+     <AssemblyName>JudasEncodingManager</AssemblyName>
+     <RootNamespace>JudasEncodingManager</RootNamespace>
+-    <Version>1.3.1</Version>
++    <Version>1.3</Version>
+     <Authors>Judas Team</Authors>
+     <Description>Encoding Pipeline Manager for Judas</Description>
