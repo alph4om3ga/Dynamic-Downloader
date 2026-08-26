@@ -21,3 +21,10 @@ uri = "file://attached_assets/github-update/windows-queue-regression.yml"
 type = "unspecified"
 title = "Windows queue regression workflow"
 description = "The exact workflow file that exists on the current Replit main branch but not on origin/main."
+
+[[outputs]]
+id = "bQ2EafawdL6gD99TVOqY1"
+uri = "file://attached_assets/release-build-hotfix.zip"
+type = "unspecified"
+title = "Release build hotfix — restore regression project"
+description = "Single Git patch and instructions to fix the failed Windows Release build and packaging job."
