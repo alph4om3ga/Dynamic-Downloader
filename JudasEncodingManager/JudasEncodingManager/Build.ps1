@@ -46,6 +46,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 $projectPath = Join-Path $ScriptDir "JudasEncodingManager.csproj"
+$regressionProjectPath = Join-Path $ScriptDir "..\RegressionTests\JudasEncodingManager.RegressionTests.csproj"
 
 if ($ExpectedVersion) {
     Write-Host "[release] Validating release version..." -ForegroundColor Yellow
@@ -77,13 +78,15 @@ if ($Clean) {
 
 # Restore packages
 Write-Host "[2/5] Restoring NuGet packages..." -ForegroundColor Yellow
-dotnet restore
-if ($LASTEXITCODE -ne 0) { throw "Restore failed" }
+dotnet restore $projectPath
+if ($LASTEXITCODE -ne 0) { throw "Application restore failed" }
+dotnet restore $regressionProjectPath
+if ($LASTEXITCODE -ne 0) { throw "Regression restore failed" }
 Write-Host "      Restored!" -ForegroundColor Green
 
 # Run focused safety checks before producing a release build.
 Write-Host "[3/5] Running regression checks..." -ForegroundColor Yellow
-dotnet run --project "..\RegressionTests\JudasEncodingManager.RegressionTests.csproj" --framework net8.0-windows
+dotnet run --project $regressionProjectPath --framework net8.0-windows --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Regression checks failed" }
 Write-Host "      Passed!" -ForegroundColor Green
 
