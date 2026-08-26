@@ -28,3 +28,10 @@ uri = "file://attached_assets/release-build-hotfix.zip"
 type = "unspecified"
 title = "Release v1.3 hotfix"
 description = "Updated patch aligning the project and release guard to v1.3, including the clean-runner regression restore fix."
+
+[[outputs]]
+id = "UlD2YbUrbDrtCRyH_R7S0"
+uri = "file://attached_assets/release-v1.3-version-only.zip"
+type = "unspecified"
+title = "Release v1.3 version-only patch"
+description = "Minimal patch that changes only the project version from 1.3.1 to 1.3 and applies after the earlier Build.ps1 hotfix."
