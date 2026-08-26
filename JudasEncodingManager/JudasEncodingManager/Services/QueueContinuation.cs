@@ -7,6 +7,18 @@ using System.Threading.Tasks;
 namespace JudasEncodingManager.Services
 {
     /// <summary>
+    /// Runs synchronous queue cleanup without making the caller wait on filesystem work.
+    /// </summary>
+    public static class QueueCleanupScheduler
+    {
+        public static Task RunAsync(Action cleanup)
+        {
+            ArgumentNullException.ThrowIfNull(cleanup);
+            return Task.Run(cleanup);
+        }
+    }
+
+    /// <summary>
     /// Runs pending work one item at a time. An item failure is reported to the
     /// caller and does not prevent later pending items from running.
     /// </summary>

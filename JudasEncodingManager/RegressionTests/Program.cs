@@ -14,6 +14,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("revalidates access when it changes before the move", RevalidatesAccessBeforeMoveAsync),
     ("probes access before every production move retry", ProbesBeforeEveryProductionMoveRetryAsync),
     ("continues with the next queue item after a failed stop", ContinuesQueueAfterFailedStopAsync),
+    ("keeps filesystem cleanup off the caller and completes after cleanup", KeepsCleanupOffCallerAsync),
     ("classifies every Nyaa session state at the right time", ClassifiesNyaaSessionStatesAsync),
     ("shows the Nyaa one-day warning only once per cookie period", DeduplicatesNyaaSessionWarningAsync),
     ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync)
@@ -164,6 +165,61 @@ static async Task ProbesBeforeEveryProductionMoveRetryAsync()
         "probe", "move"
     }), "LocalFileHandoff must probe exclusive access before every move retry.");
     Assert(fileOperations.MoveCalls == 2, "Expected one failed move attempt followed by a retry.");
+}
+
+static async Task KeepsCleanupOffCallerAsync()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"jem-cleanup-{Guid.NewGuid():N}");
+    var sourcePath = Path.Combine(root, "source.mkv");
+    var indexPath = Path.Combine(root, "source.lwi");
+    var tempFolder = Path.Combine(root, "done");
+    var screenshotPath = Path.Combine(root, "screenshot.jpg");
+    Directory.CreateDirectory(tempFolder);
+    File.WriteAllText(sourcePath, "source");
+    File.WriteAllText(indexPath, "index");
+    File.WriteAllText(Path.Combine(tempFolder, "intermediate.bin"), "temporary");
+    File.WriteAllText(screenshotPath, "screenshot");
+
+    using var cleanupStarted = new ManualResetEventSlim();
+    using var allowCleanupToFinish = new ManualResetEventSlim();
+    var cleanupFinished = false;
+
+    try
+    {
+        var completion = QueueCleanupScheduler.RunAsync(() =>
+        {
+            cleanupStarted.Set();
+            allowCleanupToFinish.Wait();
+
+            File.Delete(sourcePath);
+            File.Delete(indexPath);
+            Directory.Delete(tempFolder, recursive: true);
+            File.Delete(screenshotPath);
+            cleanupFinished = true;
+        });
+
+        Assert(cleanupStarted.Wait(TimeSpan.FromSeconds(5)),
+            "The cleanup work did not start.");
+        Assert(!completion.IsCompleted,
+            "Queue completion became synchronous while cleanup was still blocked.");
+        Assert(!cleanupFinished,
+            "Cleanup finished before the caller observed the asynchronous boundary.");
+
+        allowCleanupToFinish.Set();
+        await completion;
+
+        Assert(cleanupFinished, "Queue completion was reported before cleanup finished.");
+        Assert(!File.Exists(sourcePath), "The source file was not cleaned up.");
+        Assert(!File.Exists(indexPath), "The LWI index file was not cleaned up.");
+        Assert(!Directory.Exists(tempFolder), "The temporary folder was not cleaned up.");
+        Assert(!File.Exists(screenshotPath), "The screenshot file was not cleaned up.");
+    }
+    finally
+    {
+        allowCleanupToFinish.Set();
+        if (Directory.Exists(root))
+            Directory.Delete(root, recursive: true);
+    }
 }
 
 static Task ClassifiesNyaaSessionStatesAsync()
