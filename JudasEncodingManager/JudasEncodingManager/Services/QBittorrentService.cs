@@ -231,33 +231,64 @@ namespace JudasEncodingManager.Services
             bool isLocal = true,
             CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(hash)) return false;
+            return (await StopTorrentWithDetailsAsync(hash, isLocal, cancellationToken)).Success;
+        }
+
+        /// <summary>
+        /// Stops a torrent using the current Web API command, with a legacy
+        /// pause-command fallback for older qBittorrent WebUI versions.
+        /// </summary>
+        public async Task<TorrentStopResult> StopTorrentWithDetailsAsync(
+            string hash,
+            bool isLocal = true,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(hash))
+                return TorrentStopResult.Failed("No torrent hash was provided.");
 
             var client = isLocal ? _localClient : _seedboxClient;
             var baseUrl = isLocal ? _localUrl : _seedboxUrl;
 
             if (isLocal)
-                if (!await LoginLocalAsync(cancellationToken)) return false;
+                if (!await LoginLocalAsync(cancellationToken))
+                    return TorrentStopResult.Failed("Could not connect to the local qBittorrent Web API.");
             else
-                if (!await LoginSeedboxAsync(cancellationToken)) return false;
+                if (!await LoginSeedboxAsync(cancellationToken))
+                    return TorrentStopResult.Failed("Could not connect to the seedbox qBittorrent Web API.");
 
             try
             {
-                var content = new FormUrlEncodedContent(new[]
+                var failures = new List<string>();
+                foreach (var command in new[] { "stop", "pause" })
                 {
-                    new KeyValuePair<string, string>("hashes", hash)
-                });
+                    using var content = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("hashes", hash)
+                    });
+                    var response = await client.PostAsync(
+                        $"{baseUrl}/api/v2/torrents/{command}",
+                        content,
+                        cancellationToken);
 
-                var response = await client.PostAsync($"{baseUrl}/api/v2/torrents/stop", content, cancellationToken);
-                return response.IsSuccessStatusCode;
+                    if (response.IsSuccessStatusCode)
+                        return TorrentStopResult.Succeeded(command);
+
+                    var responseText = await response.Content.ReadAsStringAsync(cancellationToken);
+                    var detail = string.IsNullOrWhiteSpace(responseText)
+                        ? $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}"
+                        : $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {responseText.Trim()}";
+                    failures.Add($"{command}: {detail}");
+                }
+
+                return TorrentStopResult.Failed(string.Join(" | ", failures));
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
-                return false;
+                return TorrentStopResult.Failed(ex.Message);
             }
         }
 
