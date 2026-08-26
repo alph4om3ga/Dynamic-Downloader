@@ -5,10 +5,36 @@
 
 param(
     [switch]$Clean,
-    [switch]$Release
+    [switch]$Release,
+    [string]$ExpectedVersion
 )
 
 $ErrorActionPreference = "Stop"
+
+function ConvertTo-ReleaseVersion {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Version,
+        [Parameter(Mandatory = $true)]
+        [string]$Source
+    )
+
+    $match = [regex]::Match(
+        $Version.Trim(),
+        '^[vV]?(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:\.\d+)?$'
+    )
+    if (-not $match.Success) {
+        throw "Invalid $Source version '$Version'. Expected a version such as 1.3.1 or v1.3.1."
+    }
+
+    $patch = if ($match.Groups["patch"].Success) {
+        $match.Groups["patch"].Value
+    } else {
+        "0"
+    }
+
+    return "$($match.Groups["major"].Value).$($match.Groups["minor"].Value).$patch"
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Judas Encoding Manager Build Script  " -ForegroundColor Cyan  
@@ -18,6 +44,26 @@ Write-Host ""
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
+
+$projectPath = Join-Path $ScriptDir "JudasEncodingManager.csproj"
+
+if ($ExpectedVersion) {
+    Write-Host "[release] Validating release version..." -ForegroundColor Yellow
+
+    $projectVersionNode = Select-Xml -Path $projectPath -XPath "/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='Version']" |
+        Select-Object -First 1
+    if (-not $projectVersionNode) {
+        throw "Release version mismatch: no <Version> was found in '$projectPath'."
+    }
+
+    $tagVersion = ConvertTo-ReleaseVersion -Version $ExpectedVersion -Source "Git tag"
+    $projectVersion = ConvertTo-ReleaseVersion -Version $projectVersionNode.Node.InnerText -Source "project"
+    if ($tagVersion -ne $projectVersion) {
+        throw "Release version mismatch: Git tag '$ExpectedVersion' resolves to '$tagVersion', but the project version is '$projectVersion'."
+    }
+
+    Write-Host "      Tag and project version: $tagVersion" -ForegroundColor Green
+}
 
 # Clean if requested
 if ($Clean) {
@@ -56,6 +102,17 @@ Write-Host "      Published!" -ForegroundColor Green
 # Summary
 $exePath = Join-Path $ScriptDir "publish\JudasEncodingManager.exe"
 $exeSize = [math]::Round((Get-Item $exePath).Length / 1MB, 2)
+
+if ($ExpectedVersion) {
+    $exeVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
+    $exeVersion = ConvertTo-ReleaseVersion -Version $exeVersionInfo.FileVersion -Source "executable"
+    $tagVersion = ConvertTo-ReleaseVersion -Version $ExpectedVersion -Source "Git tag"
+    if ($tagVersion -ne $exeVersion) {
+        throw "Release version mismatch: Git tag '$ExpectedVersion' resolves to '$tagVersion', but the packaged executable version is '$exeVersion'."
+    }
+
+    Write-Host "      Packaged executable version: $exeVersion" -ForegroundColor Green
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
