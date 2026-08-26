@@ -31,9 +31,52 @@ jobs:
       - name: Run Windows queue regression
         run: dotnet run --project JudasEncodingManager/RegressionTests/JudasEncodingManager.RegressionTests.csproj --framework net8.0-windows --no-restore
 
+  release-version-regression:
+    name: Release version mismatch regression
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Reject mismatched release tag before packaging
+        shell: pwsh
+        run: |
+          $buildScript = ".\JudasEncodingManager\JudasEncodingManager\Build.ps1"
+          $mismatchedTag = "v0.0.0"
+          $publishPath = ".\JudasEncodingManager\JudasEncodingManager\publish\JudasEncodingManager.exe"
+
+          $validationOutput = @()
+          $validationFailed = $false
+          try {
+            $validationOutput = @(& $buildScript -ExpectedVersion $mismatchedTag 2>&1)
+          } catch {
+            $validationFailed = $true
+            $validationOutput += $_
+          }
+
+          $validationText = $validationOutput | Out-String
+          $validationOutput | ForEach-Object { Write-Host $_ }
+
+          if (-not $validationFailed) {
+            throw "The mismatched release tag was accepted; expected Build.ps1 to fail before packaging."
+          }
+
+          if ($validationText -notmatch "Release version mismatch: Git tag '$mismatchedTag'.*project version") {
+            throw "The mismatched release tag did not report the expected tag/project version error."
+          }
+
+          if (Test-Path $publishPath) {
+            throw "A packaged executable was produced after release version validation failed."
+          }
+
+          Write-Host "Confirmed $mismatchedTag was rejected before packaging or artifact upload."
+
   release-build:
     name: Release build and packaging
-    needs: queue-regression
+    needs:
+      - queue-regression
+      - release-version-regression
     runs-on: windows-latest
 
     steps:
