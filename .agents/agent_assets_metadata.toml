@@ -35,3 +35,10 @@ uri = "file://attached_assets/release-v1.3-version-only.zip"
 type = "unspecified"
 title = "Release v1.3 version-only patch — corrected"
 description = "Validated non-empty patch that applies cleanly to the pushed GitHub baseline and changes only 1.3.1 to 1.3."
+
+[[outputs]]
+id = "kfZ-jO24PNkX1Fc5lXCHO"
+uri = "file://fix-v1.3.2-release-workflow.patch"
+type = "unspecified"
+title = "v1.3.2 release workflow fix"
+description = "Validated one-commit patch that fixes PowerShell parameter binding in the Windows release packaging workflow."

@@ -1,0 +1,33 @@
+From 3efb1152132b92aa048f8d992b9d544715364d77 Mon Sep 17 00:00:00 2001
+From: alph4om3ga <joeb2010@gmail.com>
+Date: Sat, 29 Aug 2026 17:34:04 +0000
+Subject: [PATCH] Fix release workflow parameter binding
+
+---
+ .github/workflows/windows-queue-regression.yml | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/.github/workflows/windows-queue-regression.yml b/.github/workflows/windows-queue-regression.yml
+index d6372b5..f30bbb4 100644
+--- a/.github/workflows/windows-queue-regression.yml
++++ b/.github/workflows/windows-queue-regression.yml
+@@ -93,11 +93,13 @@ jobs:
+         env:
+           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+         run: |
+-          $buildArguments = @("-Clean")
++          $buildParameters = @{
++            Clean = $true
++          }
+           if ($env:RELEASE_TAG) {
+-            $buildArguments += @("-ExpectedVersion", $env:RELEASE_TAG)
++            $buildParameters.ExpectedVersion = $env:RELEASE_TAG
+           }
+-          & .\JudasEncodingManager\JudasEncodingManager\Build.ps1 @buildArguments
++          & .\JudasEncodingManager\JudasEncodingManager\Build.ps1 @buildParameters
+ 
+       - name: Upload verified Windows package
+         uses: actions/upload-artifact@v4
+-- 
+2.53.0
+
