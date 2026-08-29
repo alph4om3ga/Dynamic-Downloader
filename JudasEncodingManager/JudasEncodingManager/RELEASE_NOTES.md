@@ -1,5 +1,15 @@
 # Release Notes
 
+## v1.3.2 (August 29, 2026)
+
+### RSS Release Detection
+- Fixed automatic monitoring for uploader-filtered Nyaa feeds such as the Varyg1001 feed used by *LV999 no Murabito*.
+- Treats a non-empty Nyaa `u=` uploader filter as authoritative when the uploader account name differs from the release title's group label, such as `Varyg1001` versus `VARYG`.
+- Preserved source-group filtering for broad RSS feeds without an uploader filter.
+
+### Regression Coverage
+- Added a regression using the exact Varyg episode 10 title and feed URL to verify episode parsing and source matching.
+
 ## v1.3 (August 25, 2026)
 
 ### Reliability

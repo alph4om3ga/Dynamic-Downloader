@@ -1918,7 +1918,7 @@
                             Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVisibilityConverter}}">
                         <TextBlock Text="Unsaved Changes" FontSize="11"/>
                     </Border>
-                    <TextBlock Text="v1.3" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="v1.3.2" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>

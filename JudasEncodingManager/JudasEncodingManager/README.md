@@ -1,4 +1,4 @@
-# Judas Encoding Manager v1.3
+# Judas Encoding Manager v1.3.2
 
 A Windows WPF application for automating the Judas anime encoding and distribution pipeline.
 
