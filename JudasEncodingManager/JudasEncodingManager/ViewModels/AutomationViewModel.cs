@@ -959,8 +959,9 @@ namespace JudasEncodingManager.ViewModels
             var items = doc.Descendants("item").ToList();
             
             // Get the expected next episode number
-            var releasedEpisodes = show.EpisodesReleased.Select(e => e.EpisodeNumber).ToHashSet();
-            var nextExpectedEpisode = releasedEpisodes.Count > 0 ? releasedEpisodes.Max() + 1 : 1;
+            var nextExpectedEpisode = EpisodeHistoryPolicy.GetNextExpectedEpisode(
+                show.EpisodesReleased.Select(e => e.EpisodeNumber),
+                show.ExpectedEpisodes);
 
             foreach (var item in items)
             {

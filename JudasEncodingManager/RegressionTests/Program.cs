@@ -22,7 +22,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("shows the Nyaa one-day warning only once per cookie period", DeduplicatesNyaaSessionWarningAsync),
     ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync),
     ("matches the exact Varyg episode missed by the older automation filter", MatchesVarygUploaderFeedReleaseAsync),
-    ("keeps source-group filtering for broad RSS feeds", FiltersBroadRssFeedsBySourceGroupAsync)
+    ("keeps source-group filtering for broad RSS feeds", FiltersBroadRssFeedsBySourceGroupAsync),
+    ("ignores an impossible episode-history outlier when choosing the next release", IgnoresEpisodeHistoryOutlierAsync)
 };
 
 var failures = new List<string>();
@@ -197,6 +198,18 @@ static Task FiltersBroadRssFeedsBySourceGroupAsync()
 
     Assert(!RssSourcePolicy.Matches(broadFeed, "Erai-raws", title),
         "Broad feeds must continue to enforce the configured source group.");
+
+    return Task.CompletedTask;
+}
+
+static Task IgnoresEpisodeHistoryOutlierAsync()
+{
+    var history = new[] { 1, 2, 3, 4, 5, 999, 7, 8, 9 };
+
+    Assert(EpisodeHistoryPolicy.GetNextExpectedEpisode(history, expectedEpisodes: 12) == 10,
+        "Episode 999 must not make a 12-episode show wait for episode 1000.");
+    Assert(EpisodeHistoryPolicy.GetNextExpectedEpisode(new[] { 1, 2, 3 }, expectedEpisodes: 0) == 4,
+        "Shows without a configured episode limit must continue using their highest history entry.");
 
     return Task.CompletedTask;
 }

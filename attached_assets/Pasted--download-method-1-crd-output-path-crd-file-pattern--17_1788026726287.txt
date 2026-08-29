@@ -1,0 +1,83 @@
+ {
+      "download_method": 1,
+      "crd_output_path": "",
+      "crd_file_pattern": "",
+      "ini_script_name": "Ao_no_Hako.ini",
+      "output_torrent_title": "LV999 no Murabito (The Villager of Level 999)",
+      "output_file_title": "LV999 no Murabito",
+      "season_number": 1,
+      "number_of_episodes_to_remove_from_count": 0,
+      "rss_feed": "https://nyaa.si/?page=rss&q=Villager+of+Level+1080p+CR&c=0_0&f=0&u=varyg1001",
+      "autopost_on_trackers": true,
+      "release_day": 6,
+      "release_time": "10:52",
+      "expected_episodes": 12,
+      "episodes_released": [
+        {
+          "episode_number": 1,
+          "version": 1,
+          "release_date": "2026-07-08T06:23:51.499881-07:00",
+          "source_filename": "",
+          "output_filename": ""
+        },
+        {
+          "episode_number": 2,
+          "version": 1,
+          "release_date": "2026-07-08T06:23:52.9531328-07:00",
+          "source_filename": "",
+          "output_filename": ""
+        },
+        {
+          "episode_number": 3,
+          "version": 1,
+          "release_date": "2026-07-08T10:26:21.2058517-07:00",
+          "source_filename": "",
+          "output_filename": ""
+        },
+        {
+          "episode_number": 4,
+          "version": 1,
+          "release_date": "2026-07-15T10:14:35.0510486-07:00",
+          "source_filename": "",
+          "output_filename": ""
+        },
+        {
+          "episode_number": 5,
+          "version": 1,
+          "release_date": "2026-07-22T10:36:13.8013488-07:00",
+          "source_filename": "",
+          "output_filename": ""
+        },
+        {
+          "episode_number": 999,
+          "version": 1,
+          "release_date": "2026-07-29T10:44:52.6184735-07:00",
+          "source_filename": "The.Villager.of.Level.999.S01E06.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG.mkv",
+          "output_filename": "[Judas] LV999 no Murabito - S01E999.mkv"
+        },
+        {
+          "episode_number": 7,
+          "version": 1,
+          "release_date": "2026-08-05T10:48:16.2078994-07:00",
+          "source_filename": "The.Villager.of.Level.999.S01E07.Youre.Changed.by.the.People.You.Meet.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG.mkv",
+          "output_filename": "[Judas] LV999 no Murabito - S01E07.mkv"
+        },
+        {
+          "episode_number": 8,
+          "version": 1,
+          "release_date": "2026-08-12T14:43:29.6700259-07:00",
+          "source_filename": "The.Villager.of.Level.999.S01E08.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG.mkv",
+          "output_filename": "[Judas] LV999 no Murabito - S01E08.mkv"
+        },
+        {
+          "episode_number": 9,
+          "version": 1,
+          "release_date": "2026-08-21T22:09:25.7621582-07:00",
+          "source_filename": "The.Villager.of.Level.999.S01E09.1080p.CR.WEB-DL.AAC2.0.H.264-VARYG.mkv",
+          "output_filename": "[Judas] LV999 no Murabito - S01E09.mkv"
+        }
+      ],
+      "is_active": true,
+      "custom_episode_regex": "",
+      "source_group": "Varyg1001",
+      "is_uncensored": false
