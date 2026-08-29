@@ -20,7 +20,9 @@ var tests = new (string Name, Func<Task> Run)[]
 #endif
     ("classifies every Nyaa session state at the right time", ClassifiesNyaaSessionStatesAsync),
     ("shows the Nyaa one-day warning only once per cookie period", DeduplicatesNyaaSessionWarningAsync),
-    ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync)
+    ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync),
+    ("matches the exact Varyg episode missed by the older automation filter", MatchesVarygUploaderFeedReleaseAsync),
+    ("keeps source-group filtering for broad RSS feeds", FiltersBroadRssFeedsBySourceGroupAsync)
 };
 
 var failures = new List<string>();
@@ -168,6 +170,35 @@ static async Task ProbesBeforeEveryProductionMoveRetryAsync()
         "probe", "move"
     }), "LocalFileHandoff must probe exclusive access before every move retry.");
     Assert(fileOperations.MoveCalls == 2, "Expected one failed move attempt followed by a retry.");
+}
+
+static Task MatchesVarygUploaderFeedReleaseAsync()
+{
+    const string title =
+        "The Villager of Level 999 S01E10 1080p CR WEB-DL AAC2.0 H.264-VARYG (LV999 no Murabito, Multi-Subs)";
+    const string feedUrl =
+        "https://nyaa.si/?page=rss&q=Villager+of+Level+1080p+CR&c=0_0&f=0&u=varyg1001";
+
+    var parser = new RssService();
+    Assert(parser.ExtractEpisodeNumber(title) == 10,
+        "The exact Varyg title must parse as episode 10.");
+    Assert(RssSourcePolicy.Matches(feedUrl, "Varyg1001", title),
+        "A Nyaa uploader-filtered feed must not reject VARYG because the saved source is Varyg1001.");
+
+    return Task.CompletedTask;
+}
+
+static Task FiltersBroadRssFeedsBySourceGroupAsync()
+{
+    const string title =
+        "The Villager of Level 999 S01E10 1080p CR WEB-DL AAC2.0 H.264-VARYG";
+    const string broadFeed =
+        "https://nyaa.si/?page=rss&q=Villager+of+Level+1080p+CR&c=0_0&f=0";
+
+    Assert(!RssSourcePolicy.Matches(broadFeed, "Erai-raws", title),
+        "Broad feeds must continue to enforce the configured source group.");
+
+    return Task.CompletedTask;
 }
 
 static async Task KeepsCleanupOffCallerAsync()

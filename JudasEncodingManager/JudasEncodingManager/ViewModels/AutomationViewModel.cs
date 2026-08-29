@@ -976,7 +976,7 @@ namespace JudasEncodingManager.ViewModels
                     // filter on top of it: VARYG titles use "-VARYG", while a newly
                     // created show may still have the default "Erai-raws" value.
                     // For broad feeds, keep the title-based source-group filter.
-                    if (!SourceMatchesRssFeed(show, title))
+                    if (!RssSourcePolicy.Matches(show.RssFeed, show.SourceGroup, title))
                     {
                         continue;
                     }
@@ -1016,36 +1016,6 @@ namespace JudasEncodingManager.ViewModels
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// Determines whether an RSS item belongs to the show's configured source.
-        /// Nyaa's "u" query parameter restricts the feed to a specific uploader, so
-        /// that feed-level filter is authoritative even when the title's group name
-        /// differs from the saved SourceGroup value.
-        /// </summary>
-        private static bool SourceMatchesRssFeed(ShowViewModel show, string title)
-        {
-            if (string.IsNullOrWhiteSpace(show.SourceGroup))
-                return true;
-
-            if (title.Contains(show.SourceGroup, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return HasNyaaUploaderFilter(show.RssFeed);
-        }
-
-        private static bool HasNyaaUploaderFilter(string feedUrl)
-        {
-            if (string.IsNullOrWhiteSpace(feedUrl))
-                return false;
-
-            // Match a non-empty Nyaa uploader query parameter, including URLs where
-            // it appears after the search/category parameters (e.g. ...&u=varyg1001).
-            return Regex.IsMatch(
-                feedUrl,
-                @"(?:^|[?&])u=[^&#\s]+",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
         private (int? Episode, int Version) ExtractEpisodeNumberAndVersion(string title, string? customRegex)
