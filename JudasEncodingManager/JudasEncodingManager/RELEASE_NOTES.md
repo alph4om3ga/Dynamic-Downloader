@@ -1,5 +1,13 @@
 # Release Notes
 
+## v1.3.5
+
+### Clearer Release Controls
+- Renamed **Queue Release** to **Queue Full/Public Release** so full-episode encoding and public Nyaa posting are explicit.
+- Updated the tooltip to clarify that Quick/Full and Hidden/Public test options do not apply to this button.
+- For a five-minute hidden test, select **Real**, **Quick (5 min)**, and **Hidden**, then click **Start Test**.
+- Encoding and posting behavior is unchanged.
+
 ## v1.3.4
 
 ### Manual Release Versions
