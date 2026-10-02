@@ -1,5 +1,13 @@
 # Release Notes
 
+## Unreleased
+
+### Absolute Number Parsing
+- Fixed four-digit RSS episode numbers such as Erai-raws One Piece releases being named as episode 01 during test runs.
+- Four-digit episode parsing is enabled only for shows with **Absolute Number** checked, including automatic monitoring and test/manual releases.
+- Preserved four-digit numbers and version suffixes for absolute releases; seasonal shows retain shorter episode numbering.
+- Test/manual releases report an unrecognized episode title instead of silently falling back to episode 1.
+
 ## v1.3.3
 
 ### Episode Numbering

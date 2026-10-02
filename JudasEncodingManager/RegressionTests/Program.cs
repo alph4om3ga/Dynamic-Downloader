@@ -26,7 +26,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("ignores an impossible episode-history outlier when choosing the next release", IgnoresEpisodeHistoryOutlierAsync),
     ("subtracts positive offsets and increases numbering for negative offsets", AppliesEpisodeOffsetsAsync),
     ("uses absolute numbering consistently and saves the checkbox", FormatsAbsoluteNumberAsync),
-    ("starts descriptions with the torrent display name", PrependsTorrentDisplayNameAsync)
+    ("starts descriptions with the torrent display name", PrependsTorrentDisplayNameAsync),
+    ("preserves four-digit source numbers in absolute test releases", ParsesFourDigitAbsoluteReleaseAsync)
 };
 
 var failures = new List<string>();
@@ -277,6 +278,48 @@ static Task PrependsTorrentDisplayNameAsync()
     text = service.GenerateDescription(item, "**Title**: @@TITLE@@", "Self-Rip");
     Assert(text.StartsWith(item.TorrentDisplayName + "\n\n**Title**: Black Torch - 10"),
         "Description headers and body titles must both respect absolute numbering.");
+    return Task.CompletedTask;
+}
+
+static Task ParsesFourDigitAbsoluteReleaseAsync()
+{
+    foreach (var number in new[] { 1080, 1180 })
+    {
+        var title = $"[Erai-raws] One Piece - {number} [1080p CR WEB-DL AVC AAC][MultiSub][98D73D8A]";
+        var parsed = RssReleaseParser.Parse(title, absoluteNumber: true);
+        Assert(parsed.Episode == number, "The actual automation parser must preserve the four-digit episode.");
+        Assert(RssReleaseParser.Parse(title, absoluteNumber: false).Episode == null,
+            "Seasonal shows must not enable four-digit parsing.");
+        var rssService = new RssService();
+        Assert(rssService.ExtractEpisodeNumber(title, absoluteNumber: true) == number,
+            "The alternate RSS path must allow four digits for absolute shows.");
+        Assert(rssService.ExtractEpisodeNumber(title, absoluteNumber: false) == null,
+            "The alternate RSS path must reject four digits for seasonal shows.");
+        var item = new QueueItem
+        {
+            Show = new WeeklyShow { OutputFileTitle = "One Piece", OutputTorrentTitle = "One Piece", AbsoluteNumber = true },
+            EpisodeNumber = parsed.Episode!.Value,
+            Version = parsed.Version
+        };
+        Assert(item.OutputFileName == $"[Judas] One Piece - {number}", "Absolute releases must not become 01.");
+        Assert(item.TorrentDisplayName.Contains($"One Piece - {number} ["), "Torrent names must preserve the episode.");
+        var description = new NyaaService().GenerateDescription(item, "**Title**: @@TITLE@@", "");
+        Assert(description.Contains($"**Title**: One Piece - {number}"), "Descriptions must preserve the episode.");
+    }
+    Assert(RssReleaseParser.Parse("[Erai-raws] One Piece - 1080v2 [1080p]", absoluteNumber: true).Version == 2,
+        "Four-digit episodes must retain version suffixes.");
+    Assert(RssReleaseParser.Parse("The Villager of Level 999 S01E10 1080p").Episode == 10,
+        "Explicit season/episode markers must still beat numbers in show titles.");
+    Assert(RssReleaseParser.Parse("One Piece [1080p]").Episode == null,
+        "A resolution must not be interpreted as an episode or silently defaulted to 1.");
+    Assert(RssReleaseParser.Parse("One Piece - 1080 [1080p]", @" - (\d+)", absoluteNumber: true).Episode == 1080,
+        "Custom episode patterns must remain supported.");
+    Assert(RssReleaseParser.Parse("One Piece - 1080 [1080p]", @" - (\d+)", absoluteNumber: false).Episode == null,
+        "Custom episode patterns must respect the Absolute Number option.");
+    Assert(RssReleaseParser.Parse("Show - 999 [1080p]", absoluteNumber: false).Episode == 999,
+        "Seasonal shows must continue recognizing three-digit episodes.");
+    Assert(RssReleaseParser.Parse("Show S01E10 [1080p]", absoluteNumber: false).Episode == 10,
+        "Seasonal episode markers must remain supported.");
     return Task.CompletedTask;
 }
 

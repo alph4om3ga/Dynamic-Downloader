@@ -66,7 +66,8 @@ namespace JudasEncodingManager.Services
             return items;
         }
 
-        public int? ExtractEpisodeNumber(string title, string? customRegex = null)
+        public int? ExtractEpisodeNumber(
+            string title, string? customRegex = null, bool absoluteNumber = false)
         {
             // Try custom regex first if provided
             if (!string.IsNullOrEmpty(customRegex))
@@ -78,7 +79,7 @@ namespace JudasEncodingManager.Services
                     {
                         if (int.TryParse(customMatch.Groups[1].Value, out int epNum))
                         {
-                            return epNum;
+                            return !absoluteNumber && epNum >= 1000 ? null : epNum;
                         }
                     }
                 }
@@ -111,7 +112,7 @@ namespace JudasEncodingManager.Services
                 {
                     if (int.TryParse(match.Groups[1].Value, out int epNum))
                     {
-                        return epNum;
+                        return !absoluteNumber && epNum >= 1000 ? null : epNum;
                     }
                 }
             }
@@ -160,7 +161,8 @@ namespace JudasEncodingManager.Services
 
             foreach (var item in feedItems.OrderByDescending(i => i.PublishDate))
             {
-                var episodeNum = ExtractEpisodeNumber(item.Title, show.CustomEpisodeRegex);
+                var episodeNum = ExtractEpisodeNumber(
+                    item.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
                 if (!episodeNum.HasValue) continue;
 
                 // Source numbering remains unchanged; offset applies only to release names.

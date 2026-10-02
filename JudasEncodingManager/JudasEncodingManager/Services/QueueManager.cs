@@ -213,7 +213,7 @@ namespace JudasEncodingManager.Services
                             {
                                 var episodeNum = _rssService.ExtractEpisodeNumber(
                                     newEpisode.Title, 
-                                    showVm.CustomEpisodeRegex);
+                                    showVm.CustomEpisodeRegex, showVm.AbsoluteNumber);
 
                                 if (episodeNum.HasValue)
                                 {
@@ -1036,12 +1036,14 @@ Encoded by: Judas Team
         {
             EnsureFoldersExist();
             
-            var episodeNum = _rssService.ExtractEpisodeNumber(selectedItem.Title, showVm.CustomEpisodeRegex);
+            var episodeNum = _rssService.ExtractEpisodeNumber(
+                selectedItem.Title, showVm.CustomEpisodeRegex, showVm.AbsoluteNumber);
 
             var queueItem = new QueueItem
             {
                 Show = showVm.Model,
-                EpisodeNumber = episodeNum ?? 1,
+                EpisodeNumber = episodeNum ?? throw new FormatException(
+                    $"Cannot identify the episode number in: {selectedItem.Title}"),
                 Version = 1,
                 SourceFileName = selectedItem.Title,
                 SourceGroup = showVm.SourceGroup,

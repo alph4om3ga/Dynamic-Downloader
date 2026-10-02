@@ -969,7 +969,8 @@ namespace JudasEncodingManager.ViewModels
                 var title = item.Element("title")?.Value ?? "";
                 
                 // Try to extract episode number and version from title
-                var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(title, show.CustomEpisodeRegex);
+                var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+                    title, show.CustomEpisodeRegex, show.AbsoluteNumber);
                 
                 if (episodeNumber.HasValue && episodeNumber.Value == nextExpectedEpisode)
                 {
@@ -1020,64 +1021,10 @@ namespace JudasEncodingManager.ViewModels
             return false;
         }
 
-        private (int? Episode, int Version) ExtractEpisodeNumberAndVersion(string title, string? customRegex)
+        private (int? Episode, int Version) ExtractEpisodeNumberAndVersion(
+            string title, string? customRegex, bool absoluteNumber = false)
         {
-            int? episodeNumber = null;
-            int version = 1;
-
-            // Try custom regex first
-            if (!string.IsNullOrEmpty(customRegex))
-            {
-                try
-                {
-                    var match = Regex.Match(title, customRegex);
-                    if (match.Success && match.Groups.Count > 1 && int.TryParse(match.Groups[1].Value, out var ep))
-                    {
-                        episodeNumber = ep;
-                    }
-                }
-                catch { }
-            }
-
-            if (episodeNumber == null)
-            {
-                // Standard patterns for episode number — most-specific first so a show
-                // title containing a number (e.g. "Level 999") can't shadow the real episode.
-                var patterns = new[]
-                {
-                    @"S\d+E(\d+)",                               // S01E06  ← unambiguous, try first
-                    @"E(\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",       // E06, E06v2
-                    @"Episode\s*(\d+)",                          // Episode 6
-                    @"Ep\.?\s*(\d+)",                            // Ep 6, Ep. 6
-                    @"#(\d+)",                                   // #06
-                    @" - (\d{2,3})(?:v\d)?(?:[ _\.]|$|\[)",     // " - 06" standard anime delimiter (before loose fallback)
-                    @"[- _](\d{2,3})(?:v\d)?(?:[- _\.]|$|\[)",   // - 06, _06, etc. (last resort)
-                };
-
-                foreach (var pattern in patterns)
-                {
-                    var match = Regex.Match(title, pattern, RegexOptions.IgnoreCase);
-                    if (match.Success && int.TryParse(match.Groups[1].Value, out var ep))
-                    {
-                        episodeNumber = ep;
-                        break;
-                    }
-                }
-            }
-
-            // Extract version (v2, v3, etc.) - look for vN pattern near the episode number
-            var versionMatch = Regex.Match(title, @"[- _](\d{2,3})v(\d)", RegexOptions.IgnoreCase);
-            if (versionMatch.Success && int.TryParse(versionMatch.Groups[2].Value, out var ver))
-            {
-                version = ver;
-                // Also use the episode number from this match if we haven't found one yet
-                if (episodeNumber == null && int.TryParse(versionMatch.Groups[1].Value, out var ep))
-                {
-                    episodeNumber = ep;
-                }
-            }
-
-            return (episodeNumber, version);
+            return RssReleaseParser.Parse(title, customRegex, absoluteNumber);
         }
 
         // Keep backward compatible method
@@ -1956,12 +1903,19 @@ namespace JudasEncodingManager.ViewModels
 
             var show    = TestRunSelectedShow;
             var episode = TestRunSelectedEpisode;
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+                episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
+            if (!episodeNumber.HasValue || episodeNumber.Value <= 0)
+            {
+                TestRunStatus = $"Cannot identify the episode number in: {episode.Title}";
+                AddLogEntry(TestRunStatus, ActivityLogLevel.Error);
+                return Task.CompletedTask;
+            }
 
             var queueItem = new QueueItem
             {
                 Show           = show.Model,
-                EpisodeNumber  = episodeNumber ?? 1,
+                EpisodeNumber  = episodeNumber.Value,
                 Version        = version,
                 Status         = QueueItemStatus.Pending,
                 StatusMessage  = "Manual release — queued",
@@ -1988,12 +1942,14 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task RunSimulatedTestAsync(ShowViewModel show, RssItem episode, CancellationToken ct)
         {
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+                episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
 
             var queueItem = new QueueItem
             {
                 Show = show.Model,
-                EpisodeNumber = episodeNumber ?? 1,
+                EpisodeNumber = episodeNumber ?? throw new FormatException(
+                    $"Cannot identify the episode number in: {episode.Title}"),
                 Version = version,
                 Status = QueueItemStatus.Pending,
                 StatusMessage = "Queued for simulated test",
@@ -2064,7 +2020,8 @@ namespace JudasEncodingManager.ViewModels
             }
 
             var settings = _getSettings();
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(episode.Title, show.CustomEpisodeRegex);
+            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+                episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
             
             AddLogEntry($"Extracted from '{episode.Title}': Episode {episodeNumber ?? 0}, Version {version}", ActivityLogLevel.Info);
 
@@ -2072,7 +2029,8 @@ namespace JudasEncodingManager.ViewModels
             var queueItem = new QueueItem
             {
                 Show = show.Model,
-                EpisodeNumber = episodeNumber ?? 1,
+                EpisodeNumber = episodeNumber ?? throw new FormatException(
+                    $"Cannot identify the episode number in: {episode.Title}"),
                 Version = version,
                 Status = QueueItemStatus.Pending,
                 StatusMessage = IsQuickEncode ? "Queued for quick test" : "Queued for full encode",
