@@ -1888,13 +1888,13 @@
                                                  Margin="0,0,8,0"
                                                  Visibility="{Binding Automation.IsTestRunning, Converter={StaticResource BoolToVisibilityConverter}}"/>
 
-                                    <!-- Queue Release — always visible when an episode is selected -->
+                                    <!-- Full/Public Release — always visible when an episode is selected -->
                                     <Button Grid.Column="1"
-                                            Content="📋 Queue Release"
+                                            Content="📋 Queue Full/Public Release"
                                             Command="{Binding Automation.QueueManualReleaseCommand}"
                                             Style="{StaticResource SecondaryButton}"
                                             Margin="0,0,8,0"
-                                            ToolTip="Add this episode to the main queue as a full (non-test) release. Use this to catch up on missed episodes — multiple episodes can be queued."/>
+                                            ToolTip="Queue a full-episode encode with PUBLIC Nyaa posting. Quick/Full and Hidden/Public test options do not apply to this button. For a 5-minute hidden test, select Real, Quick (5 min), and Hidden, then click Start Test."/>
 
                                     <!-- Start Test Run / Cancel -->
                                     <Button Grid.Column="2" Content="🚀 Start Test"
