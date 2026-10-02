@@ -8,3 +8,9 @@ Do not create a deliberately mismatched release tag until a credential has succe
 **Why:** A repository credential may read and update ordinary files while lacking GitHub's separate `workflow` permission. A failed update can leave the hosted workflow invalid or stale, making a mismatch-tag test unsafe and inconclusive. The packaged output is a Windows GUI executable, so Linux-only validation cannot prove the release launches.
 
 **How to apply:** First perform and verify a protected workflow-file update on the target branch. If the OAuth connector remains scoped to `repo` after reauthorization, or the configured Git remote cannot authenticate a push, obtain a repository credential that explicitly supports workflow writes before publishing tags. Do not treat successful unreferenced Git blob uploads as proof of workflow-write access; later tree or commit operations may still be denied. A validated patch applied from an authenticated checkout is a reliable fallback. Then confirm the tagged hosted workflow, exactly one release asset, and a Windows x64 launch.
+
+For connector-based Git object uploads, pass individual file contents through the file-reading callback rather than aggregating large shell-generated JSON payloads.
+
+**Why:** Large shell results containing release source text, even base64-encoded, have caused unexpected-token errors in the execution bridge; individual file reads succeeded.
+
+**How to apply:** Verify blob, tree, commit, and annotated-tag hashes against the local objects before updating references. Preserve exact commit and tag messages, including trailing newlines, to keep object hashes aligned.
