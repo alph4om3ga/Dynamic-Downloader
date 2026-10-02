@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## v1.3.4
 
 ### Manual Release Versions
 - Added a **Version number** spinner after Nyaa Visibility, defaulting to v1 and supporting v2, v3, and higher.
