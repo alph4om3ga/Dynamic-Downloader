@@ -163,14 +163,14 @@ namespace JudasEncodingManager.Services
                 var episodeNum = ExtractEpisodeNumber(item.Title, show.CustomEpisodeRegex);
                 if (!episodeNum.HasValue) continue;
 
-                // Apply episode offset
-                var adjustedEpNum = episodeNum.Value + show.NumberOfEpisodesToRemoveFromCount;
-                if (adjustedEpNum <= 0) continue;
+                // Source numbering remains unchanged; offset applies only to release names.
+                var sourceEpNum = episodeNum.Value;
+                if (sourceEpNum <= 0) continue;
 
                 var version = ExtractVersion(item.Title);
 
                 // Check if we already have this episode/version
-                var existing = releasedEpisodes.FirstOrDefault(e => e.EpisodeNumber == adjustedEpNum);
+                var existing = releasedEpisodes.FirstOrDefault(e => e.EpisodeNumber == sourceEpNum);
                 
                 if (existing == null)
                 {

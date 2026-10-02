@@ -21,6 +21,8 @@
     <Compile Include="../JudasEncodingManager/Services/RssService.cs" Link="Services/RssService.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="../JudasEncodingManager/Services/RssSourcePolicy.cs" Link="Services/RssSourcePolicy.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="../JudasEncodingManager/Services/EpisodeHistoryPolicy.cs" Link="Services/EpisodeHistoryPolicy.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Services/EpisodeNumberingPolicy.cs" Link="Services/EpisodeNumberingPolicy.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <Compile Include="../JudasEncodingManager/Services/NyaaService.cs" Link="Services/NyaaService.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="../JudasEncodingManager/Models/AppSettings.cs" Link="Models/AppSettings.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="../JudasEncodingManager/Models/QueueModels.cs" Link="Models/QueueModels.cs" Condition="'$(TargetFramework)' == 'net8.0'" />
   </ItemGroup>

@@ -100,6 +100,19 @@ namespace JudasEncodingManager.ViewModels
             set { _model.NumberOfEpisodesToRemoveFromCount = value; OnPropertyChanged(); }
         }
 
+        public bool AbsoluteNumber
+        {
+            get => _model.AbsoluteNumber;
+            set
+            {
+                _model.AbsoluteNumber = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsSeasonNumberEnabled));
+            }
+        }
+
+        public bool IsSeasonNumberEnabled => !AbsoluteNumber;
+
         public string RssFeed
         {
             get => _model.RssFeed;
@@ -269,6 +282,7 @@ namespace JudasEncodingManager.ViewModels
                 OutputTorrentTitle = OutputTorrentTitle + " (Copy)",
                 OutputFileTitle = OutputFileTitle + " Copy",
                 SeasonNumber = SeasonNumber,
+                AbsoluteNumber = AbsoluteNumber,
                 NumberOfEpisodesToRemoveFromCount = NumberOfEpisodesToRemoveFromCount,
                 RssFeed = RssFeed,
                 AutopostOnTrackers = AutopostOnTrackers,

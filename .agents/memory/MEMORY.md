@@ -2,3 +2,4 @@
 - [Nyaa session expiry](nyaa-session-expiry.md) — Treat legacy cookies without timestamps as untracked; tie each expiry reminder to its cookie-refresh period.
 - [qBittorrent file finalization](qbittorrent-file-finalization.md) — Never move a local download until qBittorrent explicitly confirms it is paused or stopped.
 - [Hosted release verification constraints](hosted-release-verification-constraints.md) — Verify workflow write access before tags, then validate the hosted Windows package and launch.
+- [Release numbering requirements](release-numbering-requirements.md) — User-defined offset, absolute numbering, and description-header requirements; name the offset fix accurately.

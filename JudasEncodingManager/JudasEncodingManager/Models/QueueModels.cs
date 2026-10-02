@@ -291,10 +291,15 @@ namespace JudasEncodingManager.Models
         }
         
         // Output naming - use OutputFileTitle (short name) for files
-        public string OutputFileName => $"[Judas] {Show.OutputFileTitle} - S{Show.SeasonNumber:D2}E{EpisodeNumber:D2}{(Version > 1 ? $"v{Version}" : "")}{(IsTestRun ? " [TEST]" : "")}";
+        public string OutputFileName => $"[Judas] {Show.OutputFileTitle} - {EpisodeString}{(IsTestRun ? " [TEST]" : "")}";
         
         // Episode string with version for display purposes
-        public string EpisodeString => $"S{Show.SeasonNumber:D2}E{EpisodeNumber:D2}{(Version > 1 ? $"v{Version}" : "")}";
+        // EpisodeNumber remains the source number for monitoring and history.
+        public int ReleaseEpisodeNumber => JudasEncodingManager.Services.EpisodeNumberingPolicy.RequireReleaseEpisode(
+            EpisodeNumber, Show.NumberOfEpisodesToRemoveFromCount);
+
+        public string EpisodeString => JudasEncodingManager.Services.EpisodeNumberingPolicy.Format(
+            ReleaseEpisodeNumber, Show.SeasonNumber, Show.AbsoluteNumber, Version);
         
         // Dynamic torrent display name based on actual track info
         public string TorrentDisplayName

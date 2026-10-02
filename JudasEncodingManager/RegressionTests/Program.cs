@@ -23,7 +23,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("round-trips Nyaa expiry and warning state in settings", RoundTripsNyaaSessionStateAsync),
     ("matches the exact Varyg episode missed by the older automation filter", MatchesVarygUploaderFeedReleaseAsync),
     ("keeps source-group filtering for broad RSS feeds", FiltersBroadRssFeedsBySourceGroupAsync),
-    ("ignores an impossible episode-history outlier when choosing the next release", IgnoresEpisodeHistoryOutlierAsync)
+    ("ignores an impossible episode-history outlier when choosing the next release", IgnoresEpisodeHistoryOutlierAsync),
+    ("subtracts positive offsets and increases numbering for negative offsets", AppliesEpisodeOffsetsAsync),
+    ("uses absolute numbering consistently and saves the checkbox", FormatsAbsoluteNumberAsync),
+    ("starts descriptions with the torrent display name", PrependsTorrentDisplayNameAsync)
 };
 
 var failures = new List<string>();
@@ -211,6 +214,69 @@ static Task IgnoresEpisodeHistoryOutlierAsync()
     Assert(EpisodeHistoryPolicy.GetNextExpectedEpisode(new[] { 1, 2, 3 }, expectedEpisodes: 0) == 4,
         "Shows without a configured episode limit must continue using their highest history entry.");
 
+    return Task.CompletedTask;
+}
+
+static Task AppliesEpisodeOffsetsAsync()
+{
+    Assert(EpisodeNumberingPolicy.RequireReleaseEpisode(13, 12) == 1, "13 minus 12 must release as 01.");
+    Assert(EpisodeNumberingPolicy.RequireReleaseEpisode(1, -12) == 13, "01 minus -12 must release as 13.");
+    Assert(EpisodeNumberingPolicy.RequireReleaseEpisode(10, 0) == 10, "Zero offset must preserve numbering.");
+    var item = new QueueItem
+    {
+        Show = new WeeklyShow { OutputFileTitle = "Show", SeasonNumber = 1, NumberOfEpisodesToRemoveFromCount = 12 },
+        EpisodeNumber = 13,
+        SourceFileName = "Show S01E13.mkv"
+    };
+    Assert(item.OutputFileName == "[Judas] Show - S01E01", "Source 13 must be named release 01.");
+    Assert(item.EpisodeNumber == 13 && item.SourceFileName == "Show S01E13.mkv",
+        "Offsets must not modify the original source number or filename.");
+    item.Show.NumberOfEpisodesToRemoveFromCount = -12;
+    item.EpisodeNumber = 1;
+    Assert(item.OutputFileName == "[Judas] Show - S01E13", "Source 01 must be named release 13.");
+    Assert(item.EpisodeNumber == 1, "Negative offsets must leave source 01 unchanged.");
+    try
+    {
+        EpisodeNumberingPolicy.RequireReleaseEpisode(12, 12);
+        throw new Exception("Invalid episode zero was accepted.");
+    }
+    catch (InvalidOperationException) { }
+    return Task.CompletedTask;
+}
+
+static Task FormatsAbsoluteNumberAsync()
+{
+    var show = new WeeklyShow { OutputFileTitle = "Show", OutputTorrentTitle = "Show", SeasonNumber = 3, AbsoluteNumber = true };
+    var item = new QueueItem { Show = show, EpisodeNumber = 100 };
+    Assert(item.OutputFileName == "[Judas] Show - 100", "Absolute filenames must omit the season.");
+    Assert(item.TorrentDisplayName.Contains("Show - 100 ["), "Absolute torrent names must omit the season.");
+    item.Version = 2;
+    Assert(item.EpisodeString == "100v2", "Absolute releases must preserve the version suffix.");
+    var restored = JsonConvert.DeserializeObject<WeeklyShow>(JsonConvert.SerializeObject(show))!;
+    Assert(restored.AbsoluteNumber && restored.SeasonNumber == 3, "The checkbox and saved season must round-trip.");
+    Assert(!JsonConvert.DeserializeObject<WeeklyShow>("{}")!.AbsoluteNumber, "Old settings must default to seasonal numbering.");
+    show.AbsoluteNumber = false;
+    Assert(item.OutputFileName == "[Judas] Show - S03E100v2", "Disabling absolute numbering must restore the season.");
+    return Task.CompletedTask;
+}
+
+static Task PrependsTorrentDisplayNameAsync()
+{
+    var item = new QueueItem
+    {
+        Show = new WeeklyShow { OutputTorrentTitle = "Black Torch", SeasonNumber = 1 },
+        EpisodeNumber = 10
+    };
+    item.ScreenshotUrls.Add("https://example.com/screenshot.png");
+    var service = new NyaaService();
+    var text = service.GenerateDescription(item, "**Title**: @@TITLE@@\n@@SCREENSHOTS@@", "Self-Rip");
+    Assert(text.StartsWith(item.TorrentDisplayName + "\n\n**Title**: Black Torch - S01E10"),
+        "Descriptions must start with the exact display name, a blank line, and the existing title.");
+    Assert(text.Contains("![we](https://example.com/screenshot.png)"), "Screenshots must be retained.");
+    item.Show.AbsoluteNumber = true;
+    text = service.GenerateDescription(item, "**Title**: @@TITLE@@", "Self-Rip");
+    Assert(text.StartsWith(item.TorrentDisplayName + "\n\n**Title**: Black Torch - 10"),
+        "Description headers and body titles must both respect absolute numbering.");
     return Task.CompletedTask;
 }
 

@@ -371,6 +371,9 @@ namespace JudasEncodingManager.Models
         [JsonProperty("season_number")]
         public int SeasonNumber { get; set; } = 1;
 
+        [JsonProperty("absolute_number")]
+        public bool AbsoluteNumber { get; set; } = false;
+
         [JsonProperty("number_of_episodes_to_remove_from_count")]
         public int NumberOfEpisodesToRemoveFromCount { get; set; } = 0;
 

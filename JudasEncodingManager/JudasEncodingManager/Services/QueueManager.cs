@@ -217,13 +217,13 @@ namespace JudasEncodingManager.Services
 
                                 if (episodeNum.HasValue)
                                 {
-                                    var adjustedEpNum = episodeNum.Value + showVm.NumberOfEpisodesToRemoveFromCount;
+                                    var sourceEpNum = episodeNum.Value;
                                     var version = _rssService.ExtractVersion(newEpisode.Title);
 
                                     // Check if already in queue
                                     var existsInQueue = Queue.Any(q => 
                                         q.Show.OutputTorrentTitle == showVm.OutputTorrentTitle &&
-                                        q.EpisodeNumber == adjustedEpNum &&
+                                        q.EpisodeNumber == sourceEpNum &&
                                         q.Version == version);
 
                                     if (!existsInQueue)
@@ -231,7 +231,7 @@ namespace JudasEncodingManager.Services
                                         var queueItem = new QueueItem
                                         {
                                             Show = showVm.Model,
-                                            EpisodeNumber = adjustedEpNum,
+                                            EpisodeNumber = sourceEpNum,
                                             Version = version,
                                             SourceFileName = newEpisode.Title,
                                             TorrentHash = newEpisode.InfoHash,
@@ -241,7 +241,7 @@ namespace JudasEncodingManager.Services
 
                                         // Thread-safe add to queue
                                         Application.Current?.Dispatcher?.BeginInvoke(() => Queue.Add(queueItem));
-                                        Log($"📥 New episode found: {showVm.OutputFileTitle} E{adjustedEpNum}", ActivityLogLevel.Success, queueItem);
+                                        Log($"📥 New episode found: {showVm.OutputFileTitle} E{sourceEpNum}", ActivityLogLevel.Success, queueItem);
 
                                         // Start download with error handling
                                         _ = Task.Run(async () =>
@@ -1037,12 +1037,11 @@ Encoded by: Judas Team
             EnsureFoldersExist();
             
             var episodeNum = _rssService.ExtractEpisodeNumber(selectedItem.Title, showVm.CustomEpisodeRegex);
-            var adjustedEpNum = (episodeNum ?? 1) + showVm.NumberOfEpisodesToRemoveFromCount;
 
             var queueItem = new QueueItem
             {
                 Show = showVm.Model,
-                EpisodeNumber = Math.Max(1, adjustedEpNum),
+                EpisodeNumber = episodeNum ?? 1,
                 Version = 1,
                 SourceFileName = selectedItem.Title,
                 SourceGroup = showVm.SourceGroup,

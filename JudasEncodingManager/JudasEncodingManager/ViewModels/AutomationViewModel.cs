@@ -913,8 +913,9 @@ namespace JudasEncodingManager.ViewModels
         {
             if (_crdService == null) return Task.FromResult(false);
 
-            var releasedEps = show.EpisodesReleased.Select(e => e.EpisodeNumber).ToHashSet();
-            var nextEp      = releasedEps.Count > 0 ? releasedEps.Max() + 1 : 1;
+            var nextEp = EpisodeHistoryPolicy.GetNextExpectedEpisode(
+                show.EpisodesReleased.Select(e => e.EpisodeNumber),
+                show.AbsoluteNumber || show.NumberOfEpisodesToRemoveFromCount != 0 ? 0 : show.ExpectedEpisodes);
 
             // Reconfigure in case the path changed since service was initialised
             _crdService.Configure(_getSettings().CRD.Path);
@@ -961,7 +962,7 @@ namespace JudasEncodingManager.ViewModels
             // Get the expected next episode number
             var nextExpectedEpisode = EpisodeHistoryPolicy.GetNextExpectedEpisode(
                 show.EpisodesReleased.Select(e => e.EpisodeNumber),
-                show.ExpectedEpisodes);
+                show.AbsoluteNumber || show.NumberOfEpisodesToRemoveFromCount != 0 ? 0 : show.ExpectedEpisodes);
 
             foreach (var item in items)
             {
@@ -1976,7 +1977,7 @@ namespace JudasEncodingManager.ViewModels
 
             EnqueueItem(queueItem);
 
-            TestRunStatus = $"✅ Ep {episodeNumber} queued for release — check the Queue panel.";
+            TestRunStatus = $"✅ Ep {queueItem.EpisodeNumber} queued for release — check the Queue panel.";
             AddLogEntry($"📋 Manual release queued: {queueItem.OutputFileName}", ActivityLogLevel.Success);
 
             if (!IsProcessing)

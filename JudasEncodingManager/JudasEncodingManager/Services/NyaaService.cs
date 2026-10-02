@@ -91,7 +91,7 @@ namespace JudasEncodingManager.Services
             }
             description = description.Replace("@@SCREENSHOTS@@", screenshotsMarkdown.TrimEnd());
 
-            return description;
+            return $"{item.TorrentDisplayName}\n\n{description}";
         }
 
         public async Task<NyaaPostResult> PostToNyaaAsync(QueueItem item, string torrentFilePath, string description, bool isHidden)

@@ -1,5 +1,17 @@
 # Release Notes
 
+## v1.3.3
+
+### Episode Numbering
+- Fixed Episode Offset: subtract positive offsets from source episodes; negative offsets increase release episode numbers.
+- Offsets affect release names only; source lookup, source filenames, monitoring, and episode-history numbers remain unchanged. Automatic, manual, and test releases use the same naming rule.
+- Added **Absolute Number** under Status & Options. When enabled, Season Number is disabled and release names use episode-only numbering.
+- Preserved the saved season when switching absolute numbering off.
+
+### Descriptions
+- Added the full torrent display name as the first line of generated descriptions, followed by a blank line and the existing description.
+- Absolute and seasonal episode numbering are used consistently in filenames, torrent names, and description titles.
+
 ## v1.3.2 (August 29, 2026)
 
 ### RSS Release Detection

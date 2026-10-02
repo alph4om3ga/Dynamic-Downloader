@@ -213,7 +213,18 @@
                                         <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,8,12">
                                             <TextBlock Text="Season Number" Style="{StaticResource FieldLabel}"/>
                                             <TextBox Text="{Binding SeasonNumber, UpdateSourceTrigger=PropertyChanged}" 
-                                                     Style="{StaticResource ModernTextBox}"/>
+                                                     IsEnabled="{Binding IsSeasonNumberEnabled}">
+                                                <TextBox.Style>
+                                                    <Style TargetType="TextBox" BasedOn="{StaticResource ModernTextBox}">
+                                                        <Style.Triggers>
+                                                            <Trigger Property="IsEnabled" Value="False">
+                                                                <Setter Property="Opacity" Value="0.45"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                                            </Trigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBox.Style>
+                                            </TextBox>
                                         </StackPanel>
 
                                         <StackPanel Grid.Row="1" Grid.Column="1" Margin="8,0,0,12">
@@ -231,6 +242,7 @@
                                         <StackPanel Grid.Row="2" Grid.Column="1" Margin="8,0,0,0">
                                             <TextBlock Text="Episode Offset" Style="{StaticResource FieldLabel}"/>
                                             <TextBox Text="{Binding NumberOfEpisodesToRemoveFromCount, UpdateSourceTrigger=PropertyChanged}" 
+                                                     ToolTip="Release episode = source episode minus offset. 13 with offset 12 becomes 01; 01 with offset -12 becomes 13."
                                                      Style="{StaticResource ModernTextBox}"/>
                                         </StackPanel>
                                     </Grid>
@@ -374,6 +386,11 @@
                                                       IsChecked="{Binding AutopostOnTrackers}" 
                                                       Style="{StaticResource ModernCheckBox}"
                                                       Margin="0,0,0,8"/>
+                                            <CheckBox Content="Absolute Number"
+                                                      IsChecked="{Binding AbsoluteNumber}"
+                                                      Style="{StaticResource ModernCheckBox}"
+                                                      Margin="0,0,0,8"
+                                                      ToolTip="Use episode-only numbering in release names; the saved season is retained but not used."/>
                                             <CheckBox Content="Uncensored Release" 
                                                       IsChecked="{Binding IsUncensored}" 
                                                       Style="{StaticResource ModernCheckBox}"
@@ -1918,7 +1935,7 @@
                             Visibility="{Binding HasUnsavedChanges, Converter={StaticResource BoolToVisibilityConverter}}">
                         <TextBlock Text="Unsaved Changes" FontSize="11"/>
                     </Border>
-                    <TextBlock Text="v1.3.2" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="v1.3.3" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>
