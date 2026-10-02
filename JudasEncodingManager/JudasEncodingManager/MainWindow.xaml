@@ -1678,6 +1678,7 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Grid.Row="0" Text="🧪 Test Run" Style="{StaticResource SectionHeader}"/>
@@ -1817,22 +1818,62 @@
                                     </Grid>
                                 </Border>
 
+                                <!-- Manual release version -->
+                                <Border Grid.Row="7" Background="{StaticResource SurfaceBrush}"
+                                        CornerRadius="4" Padding="8" Margin="0,4,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Version number"
+                                                   Foreground="{StaticResource TextBrush}"
+                                                   FontWeight="SemiBold" FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <Grid Grid.Column="1" ToolTip="Select the release version. v1 has no suffix; higher versions use v2, v3, and so on.">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="60"/>
+                                                <ColumnDefinition Width="28"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox Text="{Binding Automation.ManualReleaseVersionLabel, Mode=OneWay}"
+                                                     IsReadOnly="True" TextAlignment="Center"
+                                                     VerticalContentAlignment="Center"
+                                                     Style="{StaticResource ModernTextBox}"
+                                                     AutomationProperties.Name="Version number"/>
+                                            <Grid Grid.Column="1">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="*"/>
+                                                    <RowDefinition Height="*"/>
+                                                </Grid.RowDefinitions>
+                                                <RepeatButton Content="+"
+                                                              Command="{Binding Automation.IncreaseManualReleaseVersionCommand}"
+                                                              AutomationProperties.Name="Increase version"
+                                                              ToolTip="Increase version"/>
+                                                <RepeatButton Grid.Row="1" Content="−"
+                                                              Command="{Binding Automation.DecreaseManualReleaseVersionCommand}"
+                                                              AutomationProperties.Name="Decrease version"
+                                                              ToolTip="Decrease version"/>
+                                            </Grid>
+                                        </Grid>
+                                    </Grid>
+                                </Border>
+
                                 <!-- Description -->
-                                <TextBlock Grid.Row="7" 
+                                <TextBlock Grid.Row="8"
                                            Text="{Binding Automation.TestModeDescription}"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            FontSize="10" TextWrapping="Wrap" FontStyle="Italic"
                                            Margin="0,8,0,0"/>
 
                                 <!-- Status -->
-                                <TextBlock Grid.Row="8" 
+                                <TextBlock Grid.Row="9"
                                            Text="{Binding Automation.TestRunStatus}"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            FontSize="11" TextWrapping="Wrap"
                                            Margin="0,4,0,0"/>
 
                                 <!-- Action Buttons Row -->
-                                <Grid Grid.Row="9" Margin="0,8,0,0">
+                                <Grid Grid.Row="10" Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>

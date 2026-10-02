@@ -27,7 +27,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("subtracts positive offsets and increases numbering for negative offsets", AppliesEpisodeOffsetsAsync),
     ("uses absolute numbering consistently and saves the checkbox", FormatsAbsoluteNumberAsync),
     ("starts descriptions with the torrent display name", PrependsTorrentDisplayNameAsync),
-    ("preserves four-digit source numbers in absolute test releases", ParsesFourDigitAbsoluteReleaseAsync)
+    ("preserves four-digit source numbers in absolute test releases", ParsesFourDigitAbsoluteReleaseAsync),
+    ("places selected release versions correctly in files, torrents, and descriptions", FormatsSelectedReleaseVersionAsync)
 };
 
 var failures = new List<string>();
@@ -320,6 +321,47 @@ static Task ParsesFourDigitAbsoluteReleaseAsync()
         "Seasonal shows must continue recognizing three-digit episodes.");
     Assert(RssReleaseParser.Parse("Show S01E10 [1080p]", absoluteNumber: false).Episode == 10,
         "Seasonal episode markers must remain supported.");
+    return Task.CompletedTask;
+}
+
+static Task FormatsSelectedReleaseVersionAsync()
+{
+    var item = new QueueItem
+    {
+        Show = new WeeklyShow { OutputFileTitle = "Show", OutputTorrentTitle = "Show", SeasonNumber = 1 },
+        EpisodeNumber = 1
+    };
+    item.AudioTracks.Add(new AudioTrackInfo { Language = "jpn" });
+    item.AudioTracks.Add(new AudioTrackInfo { Language = "eng" });
+    foreach (var language in new[] { "eng", "fra", "spa" })
+        item.SubtitleTracks.Add(new SubtitleTrackInfo { Language = language });
+    Assert(item.Version == 1, "The default version must be v1.");
+    Assert(item.OutputFileName == "[Judas] Show - S01E01", "v1 files must not include a suffix.");
+    Assert(item.TorrentDisplayName == "[Judas] Show - S01E01 [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs] (Weekly)",
+        "v1 torrents must not include a suffix.");
+    foreach (var version in new[] { 2, 3, 12 })
+    {
+        item.Version = version;
+        Assert(item.OutputFileName + ".mkv" == $"[Judas] Show - S01E01v{version}.mkv",
+            "Filenames must append the selected version to the episode.");
+        Assert(item.TorrentDisplayName == $"[Judas] Show - S01E01 [1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]v{version} (Weekly)",
+            "Torrent titles must append the version after the tags, exactly once.");
+        var description = new NyaaService().GenerateDescription(item, "**Title**: @@TITLE@@", "");
+        Assert(description.StartsWith(item.TorrentDisplayName + "\n\n**Title**: Show - S01E01v" + version),
+            "Description header and body must follow the selected version.");
+    }
+    item.Show.AbsoluteNumber = true;
+    item.EpisodeNumber = 1080;
+    item.Version = 2;
+    Assert(item.OutputFileName == "[Judas] Show - 1080v2", "Absolute numbering must preserve the version.");
+    Assert(item.TorrentDisplayName.Contains(" - 1080 [") &&
+           item.TorrentDisplayName.Contains("[Multi-Subs]v2 (Weekly)"),
+        "Absolute torrent names must also put the version after the tags.");
+    item.Show.NumberOfEpisodesToRemoveFromCount = 12;
+    item.Show.AbsoluteNumber = false;
+    item.EpisodeNumber = 13;
+    Assert(item.OutputFileName == "[Judas] Show - S01E01v2", "Offsets and versions must compose without changing the source number.");
+    Assert(item.EpisodeNumber == 13, "The selected version must not change source numbering.");
     return Task.CompletedTask;
 }
 

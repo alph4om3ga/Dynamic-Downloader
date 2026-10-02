@@ -147,6 +147,7 @@ namespace JudasEncodingManager.ViewModels
         private bool _isSimulatedTest = true;
         private bool _isQuickEncode = true;  // true = 5-min test, false = full encode
         private bool _isHiddenPost = true;   // true = hidden on Nyaa, false = public
+        private int _manualReleaseVersion = 1;
         private bool _isTestRunning;
         private double _testRunProgress;
 
@@ -180,6 +181,10 @@ namespace JudasEncodingManager.ViewModels
             StartTestRunCommand = new AsyncRelayCommand(StartTestRunAsync, () => TestRunSelectedEpisode != null && !IsProcessing && !IsTestRunning);
             CancelTestRunCommand = new RelayCommand(CancelTestRun, () => IsTestRunning);
             QueueManualReleaseCommand = new AsyncRelayCommand(QueueManualReleaseAsync, () => TestRunSelectedEpisode != null);
+            IncreaseManualReleaseVersionCommand = new RelayCommand(
+                () => ManualReleaseVersion++, () => ManualReleaseVersion < int.MaxValue);
+            DecreaseManualReleaseVersionCommand = new RelayCommand(
+                () => ManualReleaseVersion--, () => ManualReleaseVersion > 1);
 
             // Activity log
             ClearActivityLogCommand = new RelayCommand(ClearActivityLog);
@@ -292,6 +297,8 @@ namespace JudasEncodingManager.ViewModels
         public ICommand StartTestRunCommand { get; }
         public ICommand CancelTestRunCommand { get; }
         public ICommand QueueManualReleaseCommand { get; }
+        public ICommand IncreaseManualReleaseVersionCommand { get; }
+        public ICommand DecreaseManualReleaseVersionCommand { get; }
         public ICommand ClearActivityLogCommand { get; }
 
         // ---- TEST MODE PROPERTIES ----
@@ -348,6 +355,23 @@ namespace JudasEncodingManager.ViewModels
                 OnPropertyChanged(nameof(TestModeDescription));
             }
         }
+
+        public int ManualReleaseVersion
+        {
+            get => _manualReleaseVersion;
+            set
+            {
+                var version = Math.Max(1, value);
+                if (_manualReleaseVersion == version) return;
+                _manualReleaseVersion = version;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ManualReleaseVersionLabel));
+                ((RelayCommand)IncreaseManualReleaseVersionCommand).NotifyCanExecuteChanged();
+                ((RelayCommand)DecreaseManualReleaseVersionCommand).NotifyCanExecuteChanged();
+            }
+        }
+
+        public string ManualReleaseVersionLabel => $"v{ManualReleaseVersion}";
 
         // Post visibility: Hidden vs Public
         public bool IsHiddenPost
@@ -1903,7 +1927,7 @@ namespace JudasEncodingManager.ViewModels
 
             var show    = TestRunSelectedShow;
             var episode = TestRunSelectedEpisode;
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+            var (episodeNumber, _) = ExtractEpisodeNumberAndVersion(
                 episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
             if (!episodeNumber.HasValue || episodeNumber.Value <= 0)
             {
@@ -1916,7 +1940,7 @@ namespace JudasEncodingManager.ViewModels
             {
                 Show           = show.Model,
                 EpisodeNumber  = episodeNumber.Value,
-                Version        = version,
+                Version        = ManualReleaseVersion,
                 Status         = QueueItemStatus.Pending,
                 StatusMessage  = "Manual release — queued",
                 IsTestRun      = false,              // full encode + public post
@@ -1942,7 +1966,7 @@ namespace JudasEncodingManager.ViewModels
 
         private async Task RunSimulatedTestAsync(ShowViewModel show, RssItem episode, CancellationToken ct)
         {
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+            var (episodeNumber, _) = ExtractEpisodeNumberAndVersion(
                 episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
 
             var queueItem = new QueueItem
@@ -1950,7 +1974,7 @@ namespace JudasEncodingManager.ViewModels
                 Show = show.Model,
                 EpisodeNumber = episodeNumber ?? throw new FormatException(
                     $"Cannot identify the episode number in: {episode.Title}"),
-                Version = version,
+                Version = ManualReleaseVersion,
                 Status = QueueItemStatus.Pending,
                 StatusMessage = "Queued for simulated test",
                 IsTestRun = true,
@@ -2020,10 +2044,10 @@ namespace JudasEncodingManager.ViewModels
             }
 
             var settings = _getSettings();
-            var (episodeNumber, version) = ExtractEpisodeNumberAndVersion(
+            var (episodeNumber, _) = ExtractEpisodeNumberAndVersion(
                 episode.Title, show.CustomEpisodeRegex, show.AbsoluteNumber);
             
-            AddLogEntry($"Extracted from '{episode.Title}': Episode {episodeNumber ?? 0}, Version {version}", ActivityLogLevel.Info);
+            AddLogEntry($"Extracted from '{episode.Title}': Episode {episodeNumber ?? 0}, selected release version {ManualReleaseVersionLabel}", ActivityLogLevel.Info);
 
             // IsTestRun controls whether EncodingService uses 5-min ffmpeg (true) or full PowerShell (false)
             var queueItem = new QueueItem
@@ -2031,7 +2055,7 @@ namespace JudasEncodingManager.ViewModels
                 Show = show.Model,
                 EpisodeNumber = episodeNumber ?? throw new FormatException(
                     $"Cannot identify the episode number in: {episode.Title}"),
-                Version = version,
+                Version = ManualReleaseVersion,
                 Status = QueueItemStatus.Pending,
                 StatusMessage = IsQuickEncode ? "Queued for quick test" : "Queued for full encode",
                 IsTestRun = IsQuickEncode,  // Quick = 5-min ffmpeg, Full = PowerShell script

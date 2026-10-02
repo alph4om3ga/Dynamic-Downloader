@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Manual Release Versions
+- Added a **Version number** spinner after Nyaa Visibility, defaulting to v1 and supporting v2, v3, and higher.
+- Selected versions apply to manual releases and simulated/real test runs without changing automatically detected source versions in scheduled monitoring.
+- Filenames retain the episode suffix (for example, `S01E01v2.mkv`); torrent display names place it after the quality/audio/subtitle tags (for example, `[1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]v2`).
+- v1 releases omit the version suffix; generated description headers use the updated torrent display name.
+
 ### Absolute Number Parsing
 - Fixed four-digit RSS episode numbers such as Erai-raws One Piece releases being named as episode 01 during test runs.
 - Four-digit episode parsing is enabled only for shows with **Absolute Number** checked, including automatic monitoring and test/manual releases.

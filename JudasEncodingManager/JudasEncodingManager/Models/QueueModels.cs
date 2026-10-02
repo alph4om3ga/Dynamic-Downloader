@@ -337,7 +337,9 @@ namespace JudasEncodingManager.Models
                 var testTag = IsTestRun ? " [TEST]" : "";
                 var versionTag = Version > 1 ? $"v{Version}" : "";
                 
-                return $"[Judas] {Show.OutputTorrentTitle}{uncensoredTag} - {EpisodeString} [{tagString}] (Weekly){testTag}";
+                var episodeWithoutVersion = JudasEncodingManager.Services.EpisodeNumberingPolicy.Format(
+                    ReleaseEpisodeNumber, Show.SeasonNumber, Show.AbsoluteNumber, version: 1);
+                return $"[Judas] {Show.OutputTorrentTitle}{uncensoredTag} - {episodeWithoutVersion} [{tagString}]{versionTag} (Weekly){testTag}";
             }
         }
         

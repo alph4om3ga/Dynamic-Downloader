@@ -26,3 +26,9 @@ Generated description files start with the full torrent display name, followed b
 **Why:** The user supplied a description example with that exact ordering.
 
 **How to apply:** Retain the existing body, metadata, links, and screenshots.
+
+Manual release controls include a **Version number** spinner after Nyaa Visibility, defaulting to v1 and allowing higher versions.
+
+**Why:** The user requested an explicit selectable manual-release version.
+
+**How to apply:** The selected value overrides source-title versions for manual releases and tests, not scheduled monitoring. v1 has no suffix. Higher versions follow the episode in filenames (`S01E01v2.mkv`) and the quality/audio/subtitle tags in torrent titles (`[1080p][HEVC x265 10bit][Dual-Audio][Multi-Subs]v2`).
