@@ -14,3 +14,9 @@ For connector-based Git object uploads, pass individual file contents through th
 **Why:** Large shell results containing release source text, even base64-encoded, have caused unexpected-token errors in the execution bridge; individual file reads succeeded.
 
 **How to apply:** Verify blob, tree, commit, and annotated-tag hashes against the local objects before updating references. Preserve exact commit and tag messages, including trailing newlines, to keep object hashes aligned.
+
+Shell callback output may normalize line endings and omit the final newline, so it is not an exact source for Git object contents.
+
+**Why:** Reconstructing an annotated tag from shell output produced a different hash when the message's trailing newline was lost.
+
+**How to apply:** Export raw Git metadata to a temporary file and read it with the file-reading callback. Also reread the remote branch before a connector push fallback: the matching local commit may already be present despite a shell authentication failure.
